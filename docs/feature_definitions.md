@@ -14,22 +14,26 @@ state vector in configs that do NOT set `features.second_order: true`.
 
 ### 1.1 Feature Order
 
+The operative config (`config/preprocessing.baseball.unaligned.handedness.yaml`)
+defines this 10-feature `state_vector`:
+
 | # | Name |
 |---|------|
 | 1 | `shoulder_rotation_angle` |
 | 2 | `hip_rotation_angle` |
-| 3 | `dominant_elbow_flexion_angle` |
-| 4 | `trail_elbow_flexion_angle` |
-| 5 | `dominant_knee_flexion_angle` |
-| 6 | `trail_knee_flexion_angle` |
-| 7 | `lead_knee_lift` |
-| 8 | `stride_ankle_separation` |
+| 3 | `hip_shoulder_separation_angle` |
+| 4 | `dominant_elbow_flexion_angle` |
+| 5 | `trail_elbow_flexion_angle` |
+| 6 | `dominant_knee_flexion_angle` |
+| 7 | `trail_knee_flexion_angle` |
+| 8 | `lead_knee_lift` |
+| 9 | `stride_ankle_separation` |
+| 10 | `dominant_wrist_speed` |
 
-> Note: the first-order state was 10-D in an earlier iteration that included
-> `trunk_rotation_angle` and `hip_shoulder_separation_angle`.  After the
-> handedness-fix sprint the operative config (`preprocessing.baseball.unaligned.handedness.yaml`)
-> uses the 8-feature list above.  The SINDy fit producing the 26-term baseline
-> (test recon R² = −2.768, test recon RMSE = 0.719) uses this 8-D state.
+> Note: the SINDy fit producing the 26-term baseline (test recon R² = −2.768,
+> test recon RMSE = 0.719) uses this 10-D state. `hip_shoulder_separation_angle`
+> and `dominant_wrist_speed` remain part of the operative first-order baseline —
+> they are dropped only from the *experimental* second-order redesign (Section 2).
 
 ### 1.2 Geometric Definitions
 
@@ -40,6 +44,12 @@ All features are computed by `build_feature_series` in
   projected into the x-z plane (`arctan2(z, x)`).
 - `hip_rotation_angle`: azimuth of the left-hip-minus-right-hip axis projected into
   the x-z plane.
+- `hip_shoulder_separation_angle`: `wrap_angle(shoulder_rotation_angle − hip_rotation_angle)`
+  — the torso coil between the shoulder and hip rotation planes (see Section 2.1 for
+  why it is dropped from the second-order redesign).
+- `dominant_wrist_speed`: linear speed magnitude of the dominant-side wrist joint
+  (`velocity_magnitude`), mapped from `right_wrist_speed`/`left_wrist_speed` by resolved
+  handedness.
 - `dominant_elbow_flexion_angle`: angle between the dominant-side upper-arm and forearm
   segments (`angle_between`), mapped from `right_elbow_flexion_angle` or
   `left_elbow_flexion_angle` depending on resolved handedness.
@@ -65,9 +75,9 @@ All features are computed by `build_feature_series` in
 
 Per-clip feature payloads are `.npz` files containing:
 
-- `X`: state matrix, shape `(T, 8)`.
-- `X_dot`: derivative matrix, shape `(T, 8)`.
-- `feature_names`: array of the 8 name strings.
+- `X`: state matrix, shape `(T, 10)`.
+- `X_dot`: derivative matrix, shape `(T, 10)`.
+- `feature_names`: array of the 10 name strings.
 - `metadata`: JSON blob including `resolved_handedness`, `alignment`, derivative params.
 
 ### 1.5 Handedness Canonicalization
@@ -84,7 +94,7 @@ collapses the rotation equations toward zero.
 
 ### 1.6 Baseline A/B Result (2026-06-23)
 
-First-order 8-D state on 111 train / 29 test pool (threshold sweep, thr=0.30):
+First-order 10-D state on 111 train / 29 test pool:
 
 - Nonzero equation terms: **26**
 - Test derivative R²: ≈ 0 (near zero)
@@ -97,8 +107,8 @@ This is the reference point for all subsequent experiments.
 
 ## 2. Dropped Features — Rationale
 
-Two features present in earlier iterations were explicitly excluded from the
-second-order redesign (and are not in the operative first-order state either):
+Two features that ARE present in the operative first-order baseline (Section 1.1)
+were explicitly excluded from the experimental second-order redesign:
 
 ### 2.1 `hip_shoulder_separation_angle` — algebraic identity
 
@@ -115,9 +125,9 @@ Wrist speed is a scalar magnitude, not a position coordinate.  A magnitude
 cannot be paired with a velocity via physical kinematics — there is no natural
 `dominant_wrist_speed_rate` that closes the second-order structure.  Including it
 breaks the strict `(position, velocity, acceleration)` triples required by the
-second-order scheme.  The feature remains computable via `build_feature_series`
-but is not part of either the operative state or the second-order experimental
-state.
+second-order scheme.  It remains part of the operative
+first-order baseline (Section 1.1) but is excluded from the second-order
+experimental state.
 
 ---
 
@@ -125,7 +135,7 @@ state.
 
 > **Status: EXPERIMENTAL — REGRESSION ON RECONSTRUCTION — NOT ADOPTED**
 >
-> The operative production model remains the first-order 8-D state above.
+> The operative production model remains the first-order 10-D state above.
 > The second-order state was implemented and an A/B comparison was run on
 > 2026-06-23.  The derivative fit improved but reconstruction regressed
 > substantially (see Section 3.5).  The first-order baseline is retained.
@@ -147,8 +157,9 @@ single-coefficient terms.  A strict second-order state makes this explicit:
 
 ### 3.2 Positions (8-D)
 
-The same 8 positions as the operative first-order state (Section 1.1), in the
-same order:
+The 8 positions are the operative first-order angle/position features (Section 1.1)
+minus the two dropped features (`hip_shoulder_separation_angle`, `dominant_wrist_speed`;
+Section 2):
 
 `shoulder_rotation_angle`, `hip_rotation_angle`, `dominant_elbow_flexion_angle`,
 `trail_elbow_flexion_angle`, `dominant_knee_flexion_angle`, `trail_knee_flexion_angle`,
@@ -221,7 +232,7 @@ coefficient on their paired `_rate` column (window_length=9), confirming the
 by-construction guarantee worked.
 
 **Decision: DO NOT SHIP.** The reconstruction regression outweighs the derivative
-improvement.  The first-order 8-D baseline is retained as operative.
+improvement.  The first-order 10-D baseline is retained as operative.
 
 **Worst subgroups:** left-handed pitchers (mean recon RMSE ≈ 12.8 vs ≈ 7.1 for
 right-handed); fastballs worst pitch type.
