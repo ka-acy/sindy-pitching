@@ -229,6 +229,7 @@ def main() -> None:
     feature_names = list(feature_cfg["state_vector"])
     default_handedness = str(feature_cfg.get("default_handedness", "R"))
     infer_handedness_for_pitching = bool(feature_cfg.get("infer_handedness_for_pitching", False))
+    second_order = bool(feature_cfg.get("second_order", False))
     alignment_cfg = dict(feature_cfg.get("alignment", {}))
     feature_output_root = processed_root / feature_cfg["output_subdir"]
     log_dir = PROJECT_ROOT / config["logging"]["log_dir"]
@@ -252,19 +253,37 @@ def main() -> None:
             handedness_source = "default"
         feature_series = canonicalize_feature_series(feature_series, resolved_handedness)
         feature_series, alignment_meta = align_feature_series(feature_series, row["task_type"], alignment_cfg)
-        state_matrix = build_state_matrix(
-            feature_series,
-            feature_names,
-            bool(feature_cfg["angle_unwrap"]),
-        )
-        derivative_matrix, derivative_window = estimate_derivatives(
-            state_matrix,
-            dt,
-            feature_names,
-            bool(feature_cfg["angle_unwrap"]),
-            int(feature_cfg["derivative"]["window_length"]),
-            int(feature_cfg["derivative"]["polyorder"]),
-        )
+        if second_order:
+            position_names = feature_names
+            window_length = int(feature_cfg["derivative"]["window_length"])
+            polyorder = int(feature_cfg["derivative"]["polyorder"])
+            X_pos, V, A = compute_second_order_state(
+                feature_series,
+                position_names,
+                dt,
+                window_length,
+                polyorder,
+                bool(feature_cfg["angle_unwrap"]),
+            )
+            state_matrix = np.hstack([X_pos, V])
+            derivative_matrix = np.hstack([V, A])
+            output_feature_names = list(position_names) + [f"{name}_rate" for name in position_names]
+            derivative_window = adjusted_window(state_matrix.shape[0], window_length, polyorder)
+        else:
+            state_matrix = build_state_matrix(
+                feature_series,
+                feature_names,
+                bool(feature_cfg["angle_unwrap"]),
+            )
+            derivative_matrix, derivative_window = estimate_derivatives(
+                state_matrix,
+                dt,
+                feature_names,
+                bool(feature_cfg["angle_unwrap"]),
+                int(feature_cfg["derivative"]["window_length"]),
+                int(feature_cfg["derivative"]["polyorder"]),
+            )
+            output_feature_names = feature_names
 
         output_path = feature_output_root / Path(row["filepath"]).name
         metadata = {
@@ -272,13 +291,13 @@ def main() -> None:
             "resolved_handedness": resolved_handedness,
             "resolved_handedness_source": handedness_source,
             "alignment": alignment_meta,
-            "feature_names": feature_names,
-            "num_features": len(feature_names),
+            "feature_names": output_feature_names,
+            "num_features": len(output_feature_names),
             "derivative_method": feature_cfg["derivative"]["method"],
             "derivative_window_length": derivative_window,
             "derivative_polyorder": int(feature_cfg["derivative"]["polyorder"]),
         }
-        save_feature_payload(output_path, state_matrix, derivative_matrix, feature_names, metadata)
+        save_feature_payload(output_path, state_matrix, derivative_matrix, output_feature_names, metadata)
 
         manifest_rows.append(
             {
