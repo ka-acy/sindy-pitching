@@ -208,6 +208,8 @@ def main() -> None:
     config = load_config((PROJECT_ROOT / args.config).resolve())
     eval_cfg = config["evaluation"]
     integrator = str(eval_cfg.get("integrator", "euler"))
+    recon_horizons = [int(h) for h in eval_cfg.get("recon_horizons", [5, 10, 20, 40])]
+    horizon_r2_cols = [f"mean_core_recon_r2_h{h}" for h in recon_horizons]
 
     feature_root = PROJECT_ROOT / "data" / "baseball" / "processed" / args.eval_split / eval_cfg["feature_subdir"]
     equation_root = PROJECT_ROOT / "results" / "equations" / "baseball" / args.train_split
@@ -254,6 +256,7 @@ def main() -> None:
             recon_rmses: list[float] = []
             core_r2s: list[float] = []
             core_nrmses: list[float] = []
+            horizon_core_r2s: dict[int, list[float]] = {h: [] for h in recon_horizons}
             stable_flags: list[float] = []
             plotted = 0
 
@@ -283,6 +286,12 @@ def main() -> None:
                     core_nrmses.append(core_nrmse)
                     core_position_recon_r2 = core_r2
                     core_position_recon_nrmse = core_nrmse
+                    # Short-horizon core R2: shorter free-run rollouts accumulate
+                    # less error. Slice the same simulation at each horizon.
+                    for h in recon_horizons:
+                        if recon_frames >= h >= 2:
+                            h_r2, _ = core_position_metrics(X_recon[:h], sim[:h], feature_names)
+                            horizon_core_r2s[h].append(h_r2)
                     if plotted < int(eval_cfg["max_plot_trials_per_label"]):
                         t = np.arange(recon_frames, dtype=np.float64) * dt
                         plot_path = plot_root / task_type
@@ -335,6 +344,10 @@ def main() -> None:
                     "mean_reconstruction_rmse": float(np.mean(recon_rmses)) if recon_rmses else "",
                     "mean_core_position_recon_r2": float(np.mean(core_r2s)) if core_r2s else "",
                     "mean_core_position_recon_nrmse": float(np.mean(core_nrmses)) if core_nrmses else "",
+                    **{
+                        f"mean_core_recon_r2_h{h}": (float(np.mean(horizon_core_r2s[h])) if horizon_core_r2s[h] else "")
+                        for h in recon_horizons
+                    },
                 }
             )
 
@@ -373,6 +386,7 @@ def main() -> None:
             "mean_reconstruction_rmse",
             "mean_core_position_recon_r2",
             "mean_core_position_recon_nrmse",
+            *horizon_r2_cols,
         ],
         summary_rows,
     )
