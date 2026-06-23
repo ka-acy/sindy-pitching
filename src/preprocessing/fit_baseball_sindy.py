@@ -49,6 +49,9 @@ def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray],
     """
     degree = int(candidate["polynomial_degree"])
     include_bias = bool(candidate["include_bias"])
+    # Match the plain build_model library exactly so weak/plain feature ordering
+    # stays aligned for the coefficient transplant (matters once degree >= 2).
+    include_interaction = bool(candidate["include_interaction"])
     K = int(weak_cfg.get("K", 100))
     thetas: list[np.ndarray] = []
     targets: list[np.ndarray] = []
@@ -58,7 +61,7 @@ def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray],
         k_eff = max(8, min(K, n // 2))
         grid = np.arange(n, dtype=np.float64) * dt
         lib = ps.WeakPDELibrary(
-            function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias),
+            function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias, include_interaction=include_interaction),
             spatiotemporal_grid=grid,
             K=k_eff,
         )
