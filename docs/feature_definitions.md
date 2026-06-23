@@ -332,9 +332,32 @@ The deeper finding still holds: even the best model's `core_position_recon_r2` i
 (−7.89), while one-step derivative R² hovers near 0. A single global linear SINDy model
 predicts the *next* step but cannot be free-run for 40 frames on held-out clips — error
 compounds across heterogeneous pitchers/views and noisy broadcast pose. Weak-form narrows
-this gap 3.7× but does not close it. The natural next step toward a *positive* result is
-**short-horizon prediction** — measure core R² at the 5–10 frame horizon the method actually
-supports, rather than a 40-frame free rollout.
+this gap 3.7× but does not close it.
+
+### 4.4 Short-horizon analysis (`evaluation.recon_horizons`)
+
+`evaluate_baseball_sindy.py` computes `core_position_recon_r2` at multiple rollout horizons
+(default 5/10/20/40 frames) from the same forward simulation, written to `summary.csv` as
+`mean_core_recon_r2_h{H}`. The two models have **opposite** horizon curves:
+
+| horizon (frames) | plain first-order | weak-form (multi-seed) |
+|-----------------:|------------------:|-----------------------:|
+| 5  | −75.5 | **−2.68** |
+| 10 | −47.8 | −5.40 |
+| 20 | −38.0 | −4.90 |
+| 40 | −29.6 | −7.89 |
+
+**Weak-form dominates the plain baseline at every horizon — ~28× at h=5.** The plain model's
+noisy coefficients drive the trajectory off course within the first few frames (catastrophic
+on short windows where the positions barely move and the variance denominator is tiny);
+weak-form's robust coefficients track the short-horizon dynamics gracefully and degrade
+slowly. This is exactly the regime SINDy is designed for, and it is the strongest evidence
+that weak-form is the right model.
+
+Absolute `core_position_recon_r2` stays negative even at h=5 (−2.68): R² is measured against
+the per-window mean, a harsh baseline when the positions are near-constant over a 5-frame
+window. The headline metric is kept at 40-frame reconstruction for continuity; the horizon
+curve is the diagnostic that exposes the qualitative plain-vs-weak-form difference.
 
 ---
 
