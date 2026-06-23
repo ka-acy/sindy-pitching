@@ -53,21 +53,32 @@ def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray],
     # stays aligned for the coefficient transplant (matters once degree >= 2).
     include_interaction = bool(candidate["include_interaction"])
     K = int(weak_cfg.get("K", 100))
+    # WeakPDELibrary places its K test-function subdomains using the global RNG
+    # and exposes no seed, so a single draw is both non-reproducible and high
+    # variance. Seed locally for reproducibility, and stack `n_seeds` independent
+    # subdomain draws (n_seeds * K test functions total) to drive the variance
+    # down. Restore the prior RNG state so the rest of the pipeline is unaffected.
+    seed = int(weak_cfg.get("seed", 7))
+    n_seeds = max(1, int(weak_cfg.get("n_seeds", 1)))
+    rng_state = np.random.get_state()
     thetas: list[np.ndarray] = []
     targets: list[np.ndarray] = []
-    for x in scaled_Xs:
-        x = np.asarray(x, dtype=np.float64)
-        n = x.shape[0]
-        k_eff = max(8, min(K, n // 2))
-        grid = np.arange(n, dtype=np.float64) * dt
-        lib = ps.WeakPDELibrary(
-            function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias, include_interaction=include_interaction),
-            spatiotemporal_grid=grid,
-            K=k_eff,
-        )
-        lib.fit(x)
-        thetas.append(np.asarray(lib.transform(x), dtype=np.float64))
-        targets.append(np.asarray(lib.convert_u_dot_integral(x), dtype=np.float64))
+    for draw in range(n_seeds):
+        np.random.seed(seed + draw)
+        for x in scaled_Xs:
+            x = np.asarray(x, dtype=np.float64)
+            n = x.shape[0]
+            k_eff = max(8, min(K, n // 2))
+            grid = np.arange(n, dtype=np.float64) * dt
+            lib = ps.WeakPDELibrary(
+                function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias, include_interaction=include_interaction),
+                spatiotemporal_grid=grid,
+                K=k_eff,
+            )
+            lib.fit(x)
+            thetas.append(np.asarray(lib.transform(x), dtype=np.float64))
+            targets.append(np.asarray(lib.convert_u_dot_integral(x), dtype=np.float64))
+    np.random.set_state(rng_state)
     Theta = np.vstack(thetas)
     Y = np.vstack(targets)
     weak_opt = ps.STLSQ(

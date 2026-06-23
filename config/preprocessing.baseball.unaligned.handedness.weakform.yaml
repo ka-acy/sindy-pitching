@@ -84,6 +84,8 @@ modeling:
   weak_form:
     enabled: true
     K: 100
+    seed: 7
+    n_seeds: 5
 evaluation:
   feature_subdir: features
   model_results_root: results/equations
