@@ -41,39 +41,46 @@ from src.preprocessing.sindy_utils import (
 
 
 def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray], dt: float, weak_cfg: dict[str, Any]) -> ps.SINDy:
-    """Fit weak-form SINDy across trajectories; return a plain-library SINDy with transplanted coefficients.
-
-    Trajectories are truncated to the common minimum length so a single weak
-    spatiotemporal grid applies. The robust weak coefficients are copied into a
-    plain PolynomialLibrary model so downstream predict/simulate is unchanged.
+    """Fit weak-form SINDy across variable-length trajectories by stacking each
+    trajectory's weak system (features + integrated target) computed on its own
+    grid, then a single STLSQ. Uses ALL data (no truncation). The robust weak
+    coefficients are transplanted into a plain PolynomialLibrary model so the
+    downstream predict/simulate path is unchanged.
     """
     degree = int(candidate["polynomial_degree"])
     include_bias = bool(candidate["include_bias"])
     K = int(weak_cfg.get("K", 100))
-    common_len = int(min(x.shape[0] for x in scaled_Xs))
-    trimmed = [np.asarray(x[:common_len], dtype=np.float64) for x in scaled_Xs]
-    grid = np.arange(common_len, dtype=np.float64) * dt
-    weak_lib = ps.WeakPDELibrary(
-        function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias),
-        spatiotemporal_grid=grid,
-        K=K,
-    )
+    thetas: list[np.ndarray] = []
+    targets: list[np.ndarray] = []
+    for x in scaled_Xs:
+        x = np.asarray(x, dtype=np.float64)
+        n = x.shape[0]
+        k_eff = max(8, min(K, n // 2))
+        grid = np.arange(n, dtype=np.float64) * dt
+        lib = ps.WeakPDELibrary(
+            function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias),
+            spatiotemporal_grid=grid,
+            K=k_eff,
+        )
+        lib.fit(x)
+        thetas.append(np.asarray(lib.transform(x), dtype=np.float64))
+        targets.append(np.asarray(lib.convert_u_dot_integral(x), dtype=np.float64))
+    Theta = np.vstack(thetas)
+    Y = np.vstack(targets)
     weak_opt = ps.STLSQ(
         threshold=float(candidate["stlsq_threshold"]),
         alpha=float(candidate["stlsq_alpha"]),
         max_iter=int(candidate["stlsq_max_iter"]),
         normalize_columns=False,
     )
-    weak_model = ps.SINDy(feature_library=weak_lib, optimizer=weak_opt)
-    weak_model.fit(trimmed, t=dt)
-    weak_coef = np.asarray(weak_model.coefficients())
+    weak_opt.fit(Theta, Y)
+    weak_coef = np.asarray(weak_opt.coef_)
 
     plain = build_model(candidate)
-    plain.fit(trimmed, t=dt)  # initialize library/optimizer structures
-    if list(plain.get_feature_names()) != list(weak_model.get_feature_names()):
-        raise ValueError(
-            f"weak/plain feature mismatch: {weak_model.get_feature_names()} vs {plain.get_feature_names()}"
-        )
+    plain.fit(np.asarray(scaled_Xs[0], dtype=np.float64), t=dt)  # initialize structures
+    plain_coef_shape = np.asarray(plain.optimizer.coef_).shape
+    if weak_coef.shape != plain_coef_shape:
+        raise ValueError(f"weak/plain coef shape mismatch: {weak_coef.shape} vs {plain_coef_shape}")
     plain.optimizer.coef_ = weak_coef
     return plain
 
