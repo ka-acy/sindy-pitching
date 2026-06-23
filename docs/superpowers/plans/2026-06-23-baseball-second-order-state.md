@@ -144,12 +144,13 @@ cp -r results/equations/baseball/train results/equations/baseball/train_first_or
 cp -r results/evaluation/baseball/train_on_test results/evaluation/baseball/train_on_test_first_order_baseline_2026-06-23
 ```
 
-- [ ] **Step 4: Commit the baseline snapshot**
+- [ ] **Step 4: Confirm the snapshot exists on disk (no commit — `results/` is gitignored)**
 
+`results/` is gitignored, so the snapshot is preserved on disk only — there is nothing to commit. Confirm the copies exist:
 ```bash
-git add results/equations/baseball/train_first_order_baseline_2026-06-23 results/evaluation/baseball/train_on_test_first_order_baseline_2026-06-23
-git commit -m "results: snapshot first-order 111/29 baseline before second-order redesign"
+ls -d results/equations/baseball/train_first_order_baseline_2026-06-23 results/evaluation/baseball/train_on_test_first_order_baseline_2026-06-23
 ```
+Expected: both directories listed. Do NOT run `git add results/...` — it is a no-op under the current `.gitignore`.
 
 ---
 
@@ -621,12 +622,15 @@ print('COLLAPSED rate eqs:', [r for r in all_rates if r not in rate_eqs])
 ```
 Expected: lists worst clips (check for handedness/pitch-type/source clustering) and any rate-derivative equation that collapsed to zero (the next feature-design target). Adapt column names if the CSV headers differ.
 
-- [ ] **Step 5: Commit the result**
+- [ ] **Step 5: Record the result (no commit — `results/` is gitignored)**
 
+`results/` is gitignored, so there is nothing to commit. Snapshot the second-order outputs aside on disk for the record and so a later run cannot silently overwrite them:
 ```bash
-git add results/equations/baseball/train results/evaluation/baseball/train_on_test
-git commit -m "results: second-order state-vector sweep + test evaluation"
+cp -r results/equations/baseball/train results/equations/baseball/train_second_order_2026-06-23
+cp -r results/evaluation/baseball/train_on_test results/evaluation/baseball/train_on_test_second_order_2026-06-23
+ls -d results/equations/baseball/train_second_order_2026-06-23 results/evaluation/baseball/train_on_test_second_order_2026-06-23
 ```
+Expected: both snapshot directories listed. Do NOT run `git add results/...`.
 
 ---
 
