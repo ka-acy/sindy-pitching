@@ -287,34 +287,54 @@ Forward simulation also gained an `evaluation.integrator` option (`euler` | `rk4
 RK4 was marginally better on the first-order baseline (core R² −29.56 vs −29.99
 under euler) and was adopted.
 
-### 4.2 Results — no lever beat the first-order baseline
+### 4.2 Results — weak-form SINDy wins the fair metric
 
 All models evaluated on the SAME restored 111/29 pool, RK4 integrator, 40-frame
-free-running reconstruction:
+free-running reconstruction. The fair metric is `core_position_recon_r2` (higher =
+less negative = better):
 
-| Config | terms | core_position_recon_r2 | core_nrmse | whole-state recon R² |
-|--------|------:|-----------------------:|-----------:|---------------------:|
-| **first-order, plain (OPERATIVE)** | **26** | **−29.56** | **3.25** | −2.80 |
-| first-order, ensemble | 40 | −36.96 | 3.52 | −3.05 |
-| first-order, weak-form (stacked) | — | −39.69 | 3.91 | −6.92 |
-| second-order, plain | 101 | −2269 | 19.10 | −6.03 |
-| second-order, ensemble | 131 | −2429 | 19.22 | −6.25 |
+| Config | core_position_recon_r2 | core_nrmse | whole-state recon R² |
+|--------|-----------------------:|-----------:|---------------------:|
+| **first-order, weak-form, multi-seed (BEST on fair metric)** | **−7.89** | **2.38** | −6.72 |
+| first-order, plain | −29.56 | 3.25 | **−2.80** |
+| first-order, ensemble | −36.96 | 3.52 | −3.05 |
+| second-order, plain | −2269 | 19.10 | −6.03 |
+| second-order, ensemble | −2429 | 19.22 | −6.25 |
 
+- **Weak-form SINDy** (`WeakPDELibrary`, stacked per-trajectory weak systems across all
+  111 clips — no truncation) is the **best** model on the fair metric: core R² −7.89
+  (3.7× better than the plain baseline −29.56) and lower NRMSE (2.38 vs 3.25).
 - **Ensemble** (bagged STLSQ) made both state vectors worse.
-- **Weak-form** (`WeakPDELibrary`, stacked per-trajectory weak systems across all 111 clips — no truncation) also underperformed the plain baseline. Its derivative R² was ≈ 0, so the robust coefficients did not transfer to held-out clips.
 - **Second-order** forward-simulation diverges catastrophically on the fair metric.
+
+**Weak-form reproducibility & variance.** `WeakPDELibrary` places its K test-function
+subdomains via the global RNG with no seed parameter, so a single draw is non-reproducible
+and high variance — single-seed core R² ranged −5.97 to −31.76 across seeds {0,1,2,3,7}.
+`build_weakform_model` now seeds locally (and restores RNG state) and stacks `n_seeds`
+independent subdomain draws (`n_seeds × K` test functions) to drive the variance down.
+At `n_seeds=5` (`seed=7`) the result is a stable, reproducible core R² = **−7.89**.
+Config: `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`.
 
 ### 4.3 Decision and interpretation
 
-**The first-order 10-D plain config remains operative.** No robustness lever beat it.
+**On the fair core-position metric, first-order weak-form (multi-seed) is the best model
+and is recommended as operative for biomechanical-position reconstruction.**
 
-The deeper finding: every configuration has a deeply negative `core_position_recon_r2`,
-yet one-step derivative R² hovers near 0. The discovered global linear models predict
-the *next* step acceptably but **cannot be free-run for 40 frames** on held-out clips —
-error compounds. This is inherent to long-horizon rollout of a single global model over
-heterogeneous pitchers/views and noisy broadcast pose, not a feature- or optimizer-design
-defect. The honest next direction is **short-horizon prediction** (measure core R² at the
-5–10 frame horizon the method actually supports) rather than 40-frame reconstruction.
+Honesty guardrail: weak-form's *whole-state* recon R² (−6.72) is worse than the plain
+baseline's (−2.80). Weak-form trades reconstruction of the high-variance `dominant_wrist_speed`
+column (which inflated the plain baseline's whole-state score) for substantially better
+reconstruction of the 8 core biomechanical positions. Because the core positions are the
+quantities of interest, the fair core metric is the one to optimize — and weak-form wins it
+decisively. If the whole-state number matters for a specific downstream use, the plain
+first-order config remains the better choice there.
+
+The deeper finding still holds: even the best model's `core_position_recon_r2` is negative
+(−7.89), while one-step derivative R² hovers near 0. A single global linear SINDy model
+predicts the *next* step but cannot be free-run for 40 frames on held-out clips — error
+compounds across heterogeneous pitchers/views and noisy broadcast pose. Weak-form narrows
+this gap 3.7× but does not close it. The natural next step toward a *positive* result is
+**short-horizon prediction** — measure core R² at the 5–10 frame horizon the method actually
+supports, rather than a 40-frame free rollout.
 
 ---
 
