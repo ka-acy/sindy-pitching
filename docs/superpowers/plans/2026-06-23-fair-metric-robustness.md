@@ -456,19 +456,125 @@ git commit -m "docs: record fair-metric robustness sweep results and operative d
 
 ---
 
-## Task 6 (CONDITIONAL — only if Task 5 Step 1 gates Phase 3 ON, after user go-ahead): Weak-form SINDy prototype
+## Task 6: Weak-form SINDy prototype (first-order winner config)
 
-**Do not start without the user's explicit go-ahead at the Phase-2 checkpoint.**
+**Approved at Phase-2 checkpoint (2026-06-23): user chose weak-form.** Prototype on the first-order winner only (`unaligned.handedness`, the best fair-metric config).
 
 **Files:**
-- Modify: `src/preprocessing/fit_baseball_sindy.py` (weak-form path, config-gated), config for the winning state vector.
+- Modify: `src/preprocessing/fit_baseball_sindy.py` (add a config-gated weak-form fit path).
+- Create: `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`.
 
 **Interfaces:**
-- Produces: a `WeakPDELibrary`-based fit on the winning state vector, evaluated on the fair metric, compared to the Phase-2 winner.
+- Produces: `build_weakform_model(candidate, scaled_Xs, dt, weak_cfg) -> ps.SINDy` — fits a `WeakPDELibrary` SINDy across (truncated, equal-length) trajectories, then transplants the robust coefficients into a plain `PolynomialLibrary` SINDy (so the existing `evaluate_baseball_sindy.py` predict/simulate flow works unchanged). Gated by `modeling.weak_form.enabled`.
 
-- [ ] **Step 1: Prototype scope (to be detailed at checkpoint)**
+**De-risked facts (verified 2026-06-23):**
+- `SINDy.fit` in pysindy 2.1.0 does NOT accept `multiple_trajectories`. Passing a **list of equal-length trajectories** with a single `spatiotemporal_grid` works.
+- Our clips vary in length → truncate every fit trajectory to the common **minimum length** so one weak grid applies (prototype simplification; log how many frames are dropped).
+- Coefficient transplant works: fit a plain `PolynomialLibrary` SINDy to initialize, then assign `plain.optimizer.coef_ = weak_coef`; `plain.predict` then works and pickles fine.
+- Weak and plain libraries must have **identical feature ordering** — assert `plain.get_feature_names() == weak_model.get_feature_names()` before transplant.
 
-Weak-form changes how the target/derivative enters the fit (the weak library integrates features against test functions over each trajectory; explicit `X_dot` is not used the same way). Because this restructures the fit path, the concrete steps will be specified when Phase 3 is approved — this task is a placeholder gate, intentionally not pre-detailed, per the spec's "gated, prototype on one config" scope.
+- [ ] **Step 1: Add the weak-form builder to `fit_baseball_sindy.py`**
+
+Add (near `build_candidate_model`):
+
+```python
+def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray], dt: float, weak_cfg: dict[str, Any]) -> ps.SINDy:
+    """Fit weak-form SINDy across trajectories; return a plain-library SINDy with transplanted coefficients.
+
+    Trajectories are truncated to the common minimum length so a single weak
+    spatiotemporal grid applies. The robust weak coefficients are copied into a
+    plain PolynomialLibrary model so downstream predict/simulate is unchanged.
+    """
+    degree = int(candidate["polynomial_degree"])
+    include_bias = bool(candidate["include_bias"])
+    K = int(weak_cfg.get("K", 100))
+    common_len = int(min(x.shape[0] for x in scaled_Xs))
+    trimmed = [np.asarray(x[:common_len], dtype=np.float64) for x in scaled_Xs]
+    grid = np.arange(common_len, dtype=np.float64) * dt
+    weak_lib = ps.WeakPDELibrary(
+        function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias),
+        spatiotemporal_grid=grid,
+        K=K,
+    )
+    weak_opt = ps.STLSQ(
+        threshold=float(candidate["stlsq_threshold"]),
+        alpha=float(candidate["stlsq_alpha"]),
+        max_iter=int(candidate["stlsq_max_iter"]),
+        normalize_columns=False,
+    )
+    weak_model = ps.SINDy(feature_library=weak_lib, optimizer=weak_opt)
+    weak_model.fit(trimmed, t=dt)
+    weak_coef = np.asarray(weak_model.coefficients())
+
+    plain = build_model(candidate)
+    plain.fit(trimmed, t=dt)  # initialize library/optimizer structures
+    if list(plain.get_feature_names()) != list(weak_model.get_feature_names()):
+        raise ValueError(
+            f"weak/plain feature mismatch: {weak_model.get_feature_names()} vs {plain.get_feature_names()}"
+        )
+    plain.optimizer.coef_ = weak_coef
+    return plain
+```
+
+- [ ] **Step 2: Gate the fit path on `modeling.weak_form`**
+
+After `ensemble_cfg = dict(modeling_cfg.get("ensemble", {}))`, add:
+```python
+    weak_cfg = dict(modeling_cfg.get("weak_form", {}))
+    use_weak = bool(weak_cfg.get("enabled", False))
+```
+In the candidate loop, replace the `model = build_candidate_model(...)` line with:
+```python
+                if use_weak:
+                    model = build_weakform_model(candidate, selection_Xs, dt, weak_cfg)
+                else:
+                    model = build_candidate_model(candidate, selection_timepoints, ensemble_cfg)
+```
+And the final-model line:
+```python
+            if use_weak:
+                final_model = build_weakform_model(best_result["candidate_config"], scaled_Xs, dt, weak_cfg)
+            else:
+                final_model = build_candidate_model(best_result["candidate_config"], full_timepoints, ensemble_cfg)
+```
+Note: weak-form models are already fitted inside the builder, but the existing code calls `model.fit(...)` / `final_model.fit(...)` afterward. That re-fit would overwrite the transplanted coefficients with a plain STLSQ fit. To prevent this, guard those two `.fit(...)` calls: wrap each existing fit call as `if not use_weak: <existing model.fit(...)>`. (The weak builder returns an already-fitted plain model.)
+
+- [ ] **Step 3: Compile**
+
+Run: `./.venv/bin/python -m compileall src/preprocessing/fit_baseball_sindy.py`
+Expected: no error.
+
+- [ ] **Step 4: Create the weak-form config**
+
+Create `config/preprocessing.baseball.unaligned.handedness.weakform.yaml` as a copy of `config/preprocessing.baseball.unaligned.handedness.yaml` (first-order, integrator: rk4), adding under `modeling:`:
+```yaml
+  weak_form:
+    enabled: true
+    K: 100
+```
+
+- [ ] **Step 5: Fit + evaluate the weak-form model**
+
+```bash
+./.venv/bin/python src/preprocessing/extract_baseball_features.py --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml --split train
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml --split train --task-types pitching
+./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml --train-split train --eval-split test --task-types pitching
+./.venv/bin/python -c "
+import csv
+r=list(csv.DictReader(open('results/evaluation/baseball/train_on_test/summary.csv')))[0]
+print('weak-form  CORE r2=%s  CORE nrmse=%s  whole r2=%s  deriv r2=%s'%(r['mean_core_position_recon_r2'],r['mean_core_position_recon_nrmse'],r['mean_reconstruction_r2'],r['mean_derivative_r2']))
+"
+```
+Report the weak-form fair metric next to the first-order baseline (CORE r2=−29.56). State whether weak-form helped, hurt, or was neutral. Log the truncation (common_len vs original clip-length distribution).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/preprocessing/fit_baseball_sindy.py config/preprocessing.baseball.unaligned.handedness.weakform.yaml
+git commit -m "feat: weak-form SINDy prototype on first-order config"
+```
+
+**Escalation:** if the multi-trajectory weak fit or the feature-name assertion fails and cannot be resolved (e.g., bias-term ordering mismatch that can't be aligned), report BLOCKED with the exact error rather than forcing a workaround — the controller will decide whether to fall back to a single-concatenated-trajectory approximation or stop the weak-form lever.
 
 ---
 
