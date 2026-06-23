@@ -266,7 +266,59 @@ improvement (+0.099) is real and shows the model fits `dX/dt` better.
 
 ---
 
-## 4. Stage A Context
+## 4. Fair-Metric Robustness Sweep (2026-06-23)
+
+### 4.1 The fair metric
+
+Whole-state `reconstruction_r2` (variance-weighted over all columns) is misleading
+across different state vectors: for the 16-D second-order state the large-variance
+velocity columns dominate, and for the 10-D first-order state the large-variance
+`dominant_wrist_speed` column inflates the score. To compare models honestly we
+added a **state-comparable** metric in `evaluate_baseball_sindy.py`, computed only
+over the 8 shared `CORE_POSITIONS`:
+
+- `core_position_recon_r2` — `r2_score(true, sim, multioutput="uniform_average")` over the 8 core columns (no column dominates).
+- `core_position_recon_nrmse` — mean of per-column `RMSE / std` over the 8 core columns (unit-free, comparable across state definitions).
+
+Whole-state metrics are still reported alongside (honesty guardrail — the fair
+metric was committed before any model was re-scored against it).
+
+Forward simulation also gained an `evaluation.integrator` option (`euler` | `rk4`);
+RK4 was marginally better on the first-order baseline (core R² −29.56 vs −29.99
+under euler) and was adopted.
+
+### 4.2 Results — no lever beat the first-order baseline
+
+All models evaluated on the SAME restored 111/29 pool, RK4 integrator, 40-frame
+free-running reconstruction:
+
+| Config | terms | core_position_recon_r2 | core_nrmse | whole-state recon R² |
+|--------|------:|-----------------------:|-----------:|---------------------:|
+| **first-order, plain (OPERATIVE)** | **26** | **−29.56** | **3.25** | −2.80 |
+| first-order, ensemble | 40 | −36.96 | 3.52 | −3.05 |
+| first-order, weak-form (stacked) | — | −39.69 | 3.91 | −6.92 |
+| second-order, plain | 101 | −2269 | 19.10 | −6.03 |
+| second-order, ensemble | 131 | −2429 | 19.22 | −6.25 |
+
+- **Ensemble** (bagged STLSQ) made both state vectors worse.
+- **Weak-form** (`WeakPDELibrary`, stacked per-trajectory weak systems across all 111 clips — no truncation) also underperformed the plain baseline. Its derivative R² was ≈ 0, so the robust coefficients did not transfer to held-out clips.
+- **Second-order** forward-simulation diverges catastrophically on the fair metric.
+
+### 4.3 Decision and interpretation
+
+**The first-order 10-D plain config remains operative.** No robustness lever beat it.
+
+The deeper finding: every configuration has a deeply negative `core_position_recon_r2`,
+yet one-step derivative R² hovers near 0. The discovered global linear models predict
+the *next* step acceptably but **cannot be free-run for 40 frames** on held-out clips —
+error compounds. This is inherent to long-horizon rollout of a single global model over
+heterogeneous pitchers/views and noisy broadcast pose, not a feature- or optimizer-design
+defect. The honest next direction is **short-horizon prediction** (measure core R² at the
+5–10 frame horizon the method actually supports) rather than 40-frame reconstruction.
+
+---
+
+## 5. Stage A Context
 
 For Stage A (UTD-MHAD pipeline validation), the feature set uses a different
 10-D state defined in `config/preprocessing.utd_mhad.example.yaml` and extracted
