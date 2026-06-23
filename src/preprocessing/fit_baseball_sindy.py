@@ -40,6 +40,44 @@ from src.preprocessing.sindy_utils import (
 )
 
 
+def build_weakform_model(candidate: dict[str, Any], scaled_Xs: list[np.ndarray], dt: float, weak_cfg: dict[str, Any]) -> ps.SINDy:
+    """Fit weak-form SINDy across trajectories; return a plain-library SINDy with transplanted coefficients.
+
+    Trajectories are truncated to the common minimum length so a single weak
+    spatiotemporal grid applies. The robust weak coefficients are copied into a
+    plain PolynomialLibrary model so downstream predict/simulate is unchanged.
+    """
+    degree = int(candidate["polynomial_degree"])
+    include_bias = bool(candidate["include_bias"])
+    K = int(weak_cfg.get("K", 100))
+    common_len = int(min(x.shape[0] for x in scaled_Xs))
+    trimmed = [np.asarray(x[:common_len], dtype=np.float64) for x in scaled_Xs]
+    grid = np.arange(common_len, dtype=np.float64) * dt
+    weak_lib = ps.WeakPDELibrary(
+        function_library=ps.PolynomialLibrary(degree=degree, include_bias=include_bias),
+        spatiotemporal_grid=grid,
+        K=K,
+    )
+    weak_opt = ps.STLSQ(
+        threshold=float(candidate["stlsq_threshold"]),
+        alpha=float(candidate["stlsq_alpha"]),
+        max_iter=int(candidate["stlsq_max_iter"]),
+        normalize_columns=False,
+    )
+    weak_model = ps.SINDy(feature_library=weak_lib, optimizer=weak_opt)
+    weak_model.fit(trimmed, t=dt)
+    weak_coef = np.asarray(weak_model.coefficients())
+
+    plain = build_model(candidate)
+    plain.fit(trimmed, t=dt)  # initialize library/optimizer structures
+    if list(plain.get_feature_names()) != list(weak_model.get_feature_names()):
+        raise ValueError(
+            f"weak/plain feature mismatch: {weak_model.get_feature_names()} vs {plain.get_feature_names()}"
+        )
+    plain.optimizer.coef_ = weak_coef
+    return plain
+
+
 def build_candidate_model(candidate: dict[str, Any], total_timepoints: int, ensemble_cfg: dict[str, Any]) -> ps.SINDy:
     """Build a SINDy model, wrapping the optimizer in EnsembleOptimizer when enabled.
 
@@ -161,6 +199,8 @@ def main() -> None:
 
     modeling_cfg = config["modeling"]
     ensemble_cfg = dict(modeling_cfg.get("ensemble", {}))
+    weak_cfg = dict(modeling_cfg.get("weak_form", {}))
+    use_weak = bool(weak_cfg.get("enabled", False))
     validation_fraction = float(modeling_cfg.get("selection_validation_fraction", 0.0))
     validation_seed = int(modeling_cfg.get("selection_validation_seed", 7))
     feature_root = PROJECT_ROOT / "data" / "baseball" / "processed" / args.split / modeling_cfg["input_feature_subdir"]
@@ -245,8 +285,12 @@ def main() -> None:
             full_timepoints = int(sum(x.shape[0] for x in scaled_Xs))
             sweep_results: list[dict[str, Any]] = []
             for candidate in candidate_configs(modeling_cfg):
-                model = build_candidate_model(candidate, selection_timepoints, ensemble_cfg)
-                model.fit(selection_Xs, t=dt, x_dot=selection_X_dots, feature_names=feature_names)
+                if use_weak:
+                    model = build_weakform_model(candidate, selection_Xs, dt, weak_cfg)
+                else:
+                    model = build_candidate_model(candidate, selection_timepoints, ensemble_cfg)
+                if not use_weak:
+                    model.fit(selection_Xs, t=dt, x_dot=selection_X_dots, feature_names=feature_names)
                 selection_metrics, selection_per_trial = evaluate_model(model, selection_Xs, selection_X_dots, dt)
                 if validation_Xs:
                     validation_metrics, validation_per_trial = evaluate_model(model, validation_Xs, validation_X_dots, dt)
@@ -268,8 +312,12 @@ def main() -> None:
             normalized_results = [{**result, "aggregate_metrics": result["validation_metrics"]} for result in sweep_results]
             best_result = pick_best_result(normalized_results, modeling_cfg["selection_metric"])
 
-            final_model = build_candidate_model(best_result["candidate_config"], full_timepoints, ensemble_cfg)
-            final_model.fit(scaled_Xs, t=dt, x_dot=scaled_X_dots, feature_names=feature_names)
+            if use_weak:
+                final_model = build_weakform_model(best_result["candidate_config"], scaled_Xs, dt, weak_cfg)
+            else:
+                final_model = build_candidate_model(best_result["candidate_config"], full_timepoints, ensemble_cfg)
+            if not use_weak:
+                final_model.fit(scaled_Xs, t=dt, x_dot=scaled_X_dots, feature_names=feature_names)
             aggregate_metrics, per_trial_metrics = evaluate_model(final_model, scaled_Xs, scaled_X_dots, dt)
             coef_rows = coefficient_rows(final_model, feature_names)
 
