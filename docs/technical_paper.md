@@ -10,7 +10,7 @@ Four intermediate results in this project were false positives that survived onl
 
 ## 1. Introduction
 
-Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale. Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits.
+Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale; the canonical kinetic descriptions of pitching mechanics were established this way (Fleisig et al. 1995). Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits. Markerless pose estimation has been validated against marker-based capture for gait, where joint-angle agreement is good for large sagittal motions and degrades for smaller out-of-plane rotations (Kanko et al. 2021); broadcast footage is a substantially harder case than the controlled multi-camera setting used in that comparison.
 
 This project investigates whether a machine-vision and sparse-dynamics workflow can produce reproducible mathematical artifacts from baseball pitching motion. The goal is not to claim that the current dataset explains elite pitching mechanics. The goal is to establish a defensible technical pipeline that can ingest pose trajectories, condition them into stable feature matrices, estimate derivatives, and fit sparse dynamical models that can be compared across preprocessing and modeling configurations under a common evaluation protocol.
 
@@ -35,15 +35,15 @@ Stage B replaces only the input-pose layer with baseball-specific standardized p
 
 ### 4.1 Stage A Validation Data
 
-Stage A uses UTD-MHAD as a proxy human-motion dataset. The selected proxy actions are labeled as `batting_like` and `pitching_like` to test rotational and ballistic motion processing. These labels are methodological categories and do not imply that UTD-MHAD motions reproduce baseball mechanics.
+Stage A uses UTD-MHAD (Chen, Jafari, and Kehtarnavaz 2015) as a proxy human-motion dataset. The selected proxy actions are labeled as `batting_like` and `pitching_like` to test rotational and ballistic motion processing. These labels are methodological categories and do not imply that UTD-MHAD motions reproduce baseball mechanics.
 
 ### 4.2 Stage B Baseball Data
 
-Stage B uses local baseball clips represented in `data/baseball/metadata/clip_manifest.csv`, local-media split files under `data/baseball/splits/`, and standardized pose payloads registered under `data/baseball/standardized_pose/`. MediaPipe pose exports are imported into a 15-joint schema compatible with the Stage A skeleton format.
+Stage B uses local baseball clips drawn from the MLB-YouTube dataset (Piergiovanni and Ryoo 2018), represented in `data/baseball/metadata/clip_manifest.csv`, with local-media split files under `data/baseball/splits/` and standardized pose payloads registered under `data/baseball/standardized_pose/`. MediaPipe pose exports are imported into a 15-joint schema compatible with the Stage A skeleton format.
 
 The current pitching pool is **140 clips** (`data/baseball/splits/pitching_local_pool.csv`), split into **111 training clips** (`pitching_local_train.csv`) and **29 held-out test clips** (`pitching_local_test.csv`). All clips come from a single consistent camera view (`broadcast_centerfield`). The effective sampling interval is `dt = 0.016683 s` (approximately 59.9 fps).
 
-Each clip additionally carries `pitch_type` and `pitch_speed_mph` labels in the pool CSV. These labels are not used by the dynamics pipeline described here; they are recorded for the label-validated representation study scoped in `docs/superpowers/specs/2026-06-23-representation-study-design.md`.
+Each clip additionally carries `pitch_type` and `pitch_speed_mph` labels in the pool CSV. These labels are not used by the dynamics pipeline described here; they are recorded for the label-validated representation study scoped in `docs/superpowers/specs/2026-06-23-representation-study-design.md`. Piergiovanni and Ryoo (2018) attempt pitch-speed and pitch-type prediction from the same broadcast footage and describe it as extremely difficult, which is the relevant prior for that study.
 
 Generated arrays, processed features, models, and result summaries are intentionally excluded from version control by `.gitignore`. They are reproducible from the commands in Section 8.
 
@@ -57,11 +57,11 @@ Each baseball pose clip is stored as a compressed `.npz` payload containing:
 - `joint_names`: ordered joint labels
 - `metadata`: JSON-serializable clip and pose-source metadata
 
-The preferred joint schema contains 15 joints: head, neck, spine, shoulders, elbows, wrists, hips, knees, and ankles. The current MediaPipe adapter maps the larger MediaPipe landmark set into this schema.
+The preferred joint schema contains 15 joints: head, neck, spine, shoulders, elbows, wrists, hips, knees, and ankles. The current adapter maps the larger MediaPipe landmark set into this schema. Pose is produced by the MediaPipe framework (Lugaresi et al. 2019) using its BlazePose topology (Bazarevsky et al. 2020), which is a monocular on-device estimator rather than a calibrated multi-camera system.
 
 ### 5.2 Preprocessing
 
-The baseball preprocessing script repairs leading and trailing missing values by edge fill, interpolates internal gaps, centers trajectories at the hip-center proxy, optionally applies orientation and scale normalization, smooths coordinates with a Savitzky-Golay filter, and trims low-motion frames around the action window.
+The baseball preprocessing script repairs leading and trailing missing values by edge fill, interpolates internal gaps, centers trajectories at the hip-center proxy, optionally applies orientation and scale normalization, smooths coordinates with a Savitzky-Golay filter (Savitzky and Golay 1964), and trims low-motion frames around the action window.
 
 The operative baseball configuration is `config/preprocessing.baseball.unaligned.handedness.yaml`, which uses:
 
@@ -95,7 +95,7 @@ Derivatives are estimated with Savitzky-Golay differentiation using window lengt
 
 ### 5.4 Sparse Model Identification
 
-SINDy models are fit with PySINDy using a polynomial library with bias and interaction terms, feature scaling enabled, and STLSQ sparse regression. The operative configuration uses:
+Sparse models are fit by the SINDy method of Brunton, Proctor, and Kutz (2016), which selects a parsimonious set of library terms for `dx/dt` by sequentially thresholded least squares (STLSQ). The implementation is PySINDy (de Silva et al. 2020; Kaptanoglu et al. 2022), using a polynomial library with bias and interaction terms, feature scaling enabled, and STLSQ sparse regression. The operative configuration uses:
 
 - polynomial degree: 1
 - STLSQ alpha: 0.001
@@ -106,7 +106,9 @@ SINDy models are fit with PySINDy using a polynomial library with bias and inter
 
 The STLSQ threshold is **not fixed**; it is swept over `{0.1, 0.15, 0.2, 0.3, 0.5}` and selected by the sparsity-weighted score on the held-out selection split. For the operative first-order configuration the sweep selects **threshold 0.2**, yielding **26 equation terms**. Section 6.3 documents a degeneracy in this selection rule.
 
-A weak-form variant is available at `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`, gated by `modeling.weak_form.enabled`. It fits a `WeakPDELibrary` SINDy over stacked per-trajectory weak systems across all 111 training clips, then transplants the resulting coefficients into a plain polynomial-library SINDy so the standard predict and simulate paths apply unchanged. Because `WeakPDELibrary` places its test-function subdomains via the global NumPy RNG with no seed parameter, a single draw is neither reproducible nor low-variance; the implementation seeds locally (restoring prior RNG state) and stacks `n_seeds` independent subdomain draws. The operative weak-form settings are `K: 100`, `seed: 7`, `n_seeds: 5`.
+A weak-form variant is available at `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`, gated by `modeling.weak_form.enabled`. This uses the weak, integral formulation of Messenger and Bortz (2021a, 2021b), which replaces pointwise derivative estimates with integrals against test functions and is therefore substantially more robust to measurement noise — the motivation for trying it on broadcast-derived pose. It fits a `WeakPDELibrary` SINDy over stacked per-trajectory weak systems across all 111 training clips, then transplants the resulting coefficients into a plain polynomial-library SINDy so the standard predict and simulate paths apply unchanged. Because `WeakPDELibrary` places its test-function subdomains via the global NumPy RNG with no seed parameter, a single draw is neither reproducible nor low-variance; the implementation seeds locally (restoring prior RNG state) and stacks `n_seeds` independent subdomain draws. The operative weak-form settings are `K: 100`, `seed: 7`, `n_seeds: 5`.
+
+An ensemble variant at `config/preprocessing.baseball.unaligned.handedness.ensemble.yaml` wraps the optimizer in bootstrap aggregation following Ensemble-SINDy (Fasel et al. 2022), which is intended to improve robustness in the low-data, high-noise regime that applies here.
 
 The model outputs include equations, coefficient matrices, model-selection logs, scaler metadata, per-trial metrics, and summary CSVs.
 
@@ -131,7 +133,7 @@ Simulation stability (finite and bounded trajectories) is reported separately. S
 skill = 1 - SSE(model) / SSE(zero-increment)
 ```
 
-where the target is `delta(t) = x(t+1) - x(t)`. Skill is 0 for persistence by construction, and positive skill means predictive structure beyond "nothing changes."
+where the target is `delta(t) = x(t+1) - x(t)`. This is the standard mean-square-error skill score, in which accuracy is expressed relative to a trivial reference forecast rather than in absolute terms (Murphy 1988); persistence is the reference here, and the climatological analogue — the window mean — is what the reconstruction R2 above uses. Skill is 0 for persistence by construction, and positive skill means predictive structure beyond "nothing changes."
 
 **Aggregation is reported two ways, and disagreement is treated as a null result.** Core positions span roughly a 13x range in per-frame signal scale (`lead_knee_lift` 0.012 versus `dominant_elbow_flexion_angle` 0.158, about 160x in variance), so pooled sum-of-squares is decided almost entirely by the largest-amplitude columns while uniform per-column averaging weights all eight equally. Every skill number in Section 6 is reported under both. Where the two disagree in sign, this paper reports no win rather than selecting the favorable aggregation. `core_position_metrics` uses uniform averaging, so uniform is the figure comparable to the rest of the project.
 
@@ -239,7 +241,7 @@ Two conclusions follow.
 
 **The state representation, not clip heterogeneity, is the binding constraint.** The per-clip oracle scores only +0.25 *in sample*, lower than a delay-embedded model scores on *held-out* clips (+0.69). A single clip cannot be fit well in the plain 10-D state even when the model is allowed to see it. This rules out the per-pitcher, per-pitch-type, and per-phase conditioning directions, which all address heterogeneity.
 
-Delay embedding's apparent gain must be discounted: an unfitted backward difference already reaches +0.3507, so roughly half of the +0.69 is numerical differentiation recovered from position history rather than learned dynamics.
+The delay-embedded rows follow Takens (1981), whose embedding theorem motivates reconstructing a state from lagged observations of a single trajectory, and the specific use of delay coordinates to obtain a linear model of nonlinear dynamics follows the HAVOK construction of Brunton et al. (2017). Their apparent gain must nonetheless be discounted: an unfitted backward difference already reaches +0.3507, so roughly half of the +0.69 is numerical differentiation recovered from position history rather than learned dynamics.
 
 ### 6.5 Short-horizon prediction: the one task that succeeds
 
@@ -530,3 +532,96 @@ The methodological contribution is the control-paired evaluation protocol: a sta
 The empirical contribution is a characterized boundary rather than a flat negative, with the failure localized. Across first-order, second-order, ensemble, and weak-form configurations on 140 single-view broadcast-derived pitching clips, no fitted sparse model survives free-running reconstruction, and all are outperformed by a zero-dynamics baseline. Yet the same data supports short-horizon prediction: 0.39 skill over persistence on held-out increments, backed by increment autocorrelation of 0.35 to 0.88 and signal-to-noise of 2.2 to 4.4. Candidate explanations were tested and excluded one at a time — phase (no gain in three forms), clip heterogeneity (the per-clip oracle scores below a cross-clip delay model), the pose noise floor (SNR 2.2 to 4.4), and the metric (the derivative targets carry 0.69 to 0.70 skill). What remains is the sparse fit itself, which retains 0 to 12 percent of the skill in its own targets. That is a specific, testable diagnosis rather than a general negative.
 
 The practical value of the boundary is that it says what to build next, and what not to. Short-horizon prediction is a task this data supports and is where a defensible biomechanical claim would have to start, but the sparse-fitting stage must be repaired before the pipeline can make that claim on its own artifacts. Free-running reconstruction of broadcast-derived pitching pose is not achievable with these methods and should not be the target. Better pose, larger pools, richer libraries, and per-pitcher conditioning are all secondary to the sparse fit, since none of them is where the measured loss occurs.
+
+## 12. Software
+
+Analysis code is Python 3.12. Numerical work uses NumPy (Harris et al. 2020) and SciPy
+(Virtanen et al. 2020); Savitzky-Golay smoothing and differentiation use `scipy.signal.savgol_filter`.
+Ridge regression, cross-validation, standardization, and R2 computation use scikit-learn
+(Pedregosa et al. 2011). Sparse model identification uses PySINDy 2.1.0 (de Silva et al. 2020;
+Kaptanoglu et al. 2022). Pose extraction uses MediaPipe (Lugaresi et al. 2019). Exact pinned
+versions are in `requirements.txt`.
+
+## Works Cited
+
+In-text citations are author–year. Entries are alphabetical by first author.
+
+Bazarevsky, Valentin, Ivan Grishchenko, Karthik Raveendran, Tyler Zhu, Fan Zhang, and
+Matthias Grundmann. "BlazePose: On-Device Real-Time Body Pose Tracking." *arXiv preprint*
+arXiv:2006.10204, 2020. https://arxiv.org/abs/2006.10204.
+
+Brunton, Steven L., Bingni W. Brunton, Joshua L. Proctor, Eurika Kaiser, and J. Nathan Kutz.
+"Chaos as an Intermittently Forced Linear System." *Nature Communications* 8 (2017): 19.
+https://doi.org/10.1038/s41467-017-00030-8.
+
+Brunton, Steven L., Joshua L. Proctor, and J. Nathan Kutz. "Discovering Governing Equations
+from Data by Sparse Identification of Nonlinear Dynamical Systems." *Proceedings of the
+National Academy of Sciences* 113, no. 15 (2016): 3932–3937.
+https://doi.org/10.1073/pnas.1517384113.
+
+Chen, Chen, Roozbeh Jafari, and Nasser Kehtarnavaz. "UTD-MHAD: A Multimodal Dataset for Human
+Action Recognition Utilizing a Depth Camera and a Wearable Inertial Sensor." In *Proceedings
+of the 2015 IEEE International Conference on Image Processing (ICIP)*, 168–172. IEEE, 2015.
+https://doi.org/10.1109/ICIP.2015.7350781.
+
+de Silva, Brian M., Kathleen Champion, Markus Quade, Jean-Christophe Loiseau, J. Nathan Kutz,
+and Steven L. Brunton. "PySINDy: A Python Package for the Sparse Identification of Nonlinear
+Dynamical Systems from Data." *Journal of Open Source Software* 5, no. 49 (2020): 2104.
+https://doi.org/10.21105/joss.02104.
+
+Fasel, Urban, J. Nathan Kutz, Bingni W. Brunton, and Steven L. Brunton. "Ensemble-SINDy:
+Robust Sparse Model Discovery in the Low-Data, High-Noise Limit, with Active Learning and
+Control." *Proceedings of the Royal Society A* 478, no. 2260 (2022): 20210904.
+https://doi.org/10.1098/rspa.2021.0904.
+
+Fleisig, Glenn S., James R. Andrews, Charles J. Dillman, and Rafael F. Escamilla. "Kinetics of
+Baseball Pitching with Implications About Injury Mechanisms." *American Journal of Sports
+Medicine* 23, no. 2 (1995): 233–239. https://doi.org/10.1177/036354659502300218.
+
+Harris, Charles R., K. Jarrod Millman, Stéfan J. van der Walt, et al. "Array Programming with
+NumPy." *Nature* 585 (2020): 357–362. https://doi.org/10.1038/s41586-020-2649-2.
+
+Kanko, Robert M., Elise K. Laende, Elizabeth M. Davis, W. Scott Selbie, and Kevin J. Deluzio.
+"Concurrent Assessment of Gait Kinematics Using Marker-Based and Markerless Motion Capture."
+*Journal of Biomechanics* 127 (2021): 110665.
+https://doi.org/10.1016/j.jbiomech.2021.110665.
+
+Kaptanoglu, Alan A., Brian M. de Silva, Urban Fasel, et al. "PySINDy: A Comprehensive Python
+Package for Robust Sparse System Identification." *Journal of Open Source Software* 7, no. 69
+(2022): 3994. https://doi.org/10.21105/joss.03994.
+
+Lugaresi, Camillo, Jiuqiang Tang, Hadon Nash, et al. "MediaPipe: A Framework for Building
+Perception Pipelines." *arXiv preprint* arXiv:1906.08172, 2019.
+https://arxiv.org/abs/1906.08172.
+
+Messenger, Daniel A., and David M. Bortz. "Weak SINDy: Galerkin-Based Data-Driven Model
+Selection." *Multiscale Modeling & Simulation* 19, no. 3 (2021a): 1474–1497.
+https://doi.org/10.1137/20M1343166.
+
+Messenger, Daniel A., and David M. Bortz. "Weak SINDy for Partial Differential Equations."
+*Journal of Computational Physics* 443 (2021b): 110525.
+https://doi.org/10.1016/j.jcp.2021.110525.
+
+Murphy, Allan H. "Skill Scores Based on the Mean Square Error and Their Relationships to the
+Correlation Coefficient." *Monthly Weather Review* 116, no. 12 (1988): 2417–2424.
+https://doi.org/10.1175/1520-0493(1988)116<2417:SSBOTM>2.0.CO;2.
+
+Pedregosa, Fabian, Gaël Varoquaux, Alexandre Gramfort, et al. "Scikit-learn: Machine Learning
+in Python." *Journal of Machine Learning Research* 12 (2011): 2825–2830.
+https://www.jmlr.org/papers/volume12/pedregosa11a/pedregosa11a.pdf.
+
+Piergiovanni, AJ, and Michael S. Ryoo. "Fine-Grained Activity Recognition in Baseball Videos."
+In *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)
+Workshops (CVsports)*, 2018. https://arxiv.org/abs/1804.03247.
+
+Savitzky, Abraham, and Marcel J. E. Golay. "Smoothing and Differentiation of Data by
+Simplified Least Squares Procedures." *Analytical Chemistry* 36, no. 8 (1964): 1627–1639.
+https://doi.org/10.1021/ac60214a047.
+
+Takens, Floris. "Detecting Strange Attractors in Turbulence." In *Dynamical Systems and
+Turbulence, Warwick 1980*, edited by David A. Rand and Lai-Sang Young, 366–381. Lecture Notes
+in Mathematics 898. Berlin: Springer, 1981. https://doi.org/10.1007/BFb0091924.
+
+Virtanen, Pauli, Ralf Gommers, Travis E. Oliphant, et al. "SciPy 1.0: Fundamental Algorithms
+for Scientific Computing in Python." *Nature Methods* 17, no. 3 (2020): 261–272.
+https://doi.org/10.1038/s41592-019-0686-2.
