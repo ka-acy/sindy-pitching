@@ -287,23 +287,37 @@ Forward simulation also gained an `evaluation.integrator` option (`euler` | `rk4
 RK4 was marginally better on the first-order baseline (core R² −29.56 vs −29.99
 under euler) and was adopted.
 
-### 4.2 Results — weak-form SINDy wins the fair metric
+### 4.2 Results — no fitted model beats a frozen control
+
+> **CORRECTED 2026-08-12.** This section previously concluded that weak-form SINDy
+> "wins the fair metric" and recommended it as operative. Adding the missing control —
+> a frozen (zero-dynamics) model scored under the identical metric — showed that
+> conclusion was wrong. The numbers below all reproduce; the ranking interpretation
+> did not survive the control. See §4.3.
 
 All models evaluated on the SAME restored 111/29 pool, RK4 integrator, 40-frame
 free-running reconstruction. The fair metric is `core_position_recon_r2` (higher =
 less negative = better):
 
-| Config | core_position_recon_r2 | core_nrmse | whole-state recon R² |
-|--------|-----------------------:|-----------:|---------------------:|
-| **first-order, weak-form, multi-seed (BEST on fair metric)** | **−7.89** | **2.38** | −6.72 |
-| first-order, plain | −29.56 | 3.25 | **−2.80** |
-| first-order, ensemble | −36.96 | 3.52 | −3.05 |
-| second-order, plain | −2269 | 19.10 | −6.03 |
-| second-order, ensemble | −2429 | 19.22 | −6.25 |
+| Config | terms | core_position_recon_r2 | core_nrmse | whole-state recon R² |
+|--------|------:|-----------------------:|-----------:|---------------------:|
+| **frozen control (no dynamics)** | **0** | **−5.57** | **2.22** | n/a |
+| first-order, weak-form, multi-seed | 1 | −7.89 | 2.38 | −6.72 |
+| first-order, plain | 26 | −29.56 | 3.25 | **−2.80** |
+| first-order, ensemble | 40 | −36.96 | 3.52 | −3.05 |
+| second-order, plain | 101 | −2269 | 19.10 | −6.03 |
+| second-order, ensemble | 131 | −2429 | 19.22 | −6.25 |
 
+- **No fitted model beats the frozen control.** A predictor that holds the first observed
+  pose constant for all 40 frames scores −5.57, better than every model fitted here.
+  Reproduce with `src/preprocessing/evaluate_static_baseline.py`.
+- **Core R² degrades monotonically with term count** (0 → 1 → 26 → 40 → 101 → 131).
+  Added expressivity strictly hurts held-out reconstruction — the signature of fitting
+  noise, not dynamics.
 - **Weak-form SINDy** (`WeakPDELibrary`, stacked per-trajectory weak systems across all
-  111 clips — no truncation) is the **best** model on the fair metric: core R² −7.89
-  (3.7× better than the plain baseline −29.56) and lower NRMSE (2.38 vs 3.25).
+  111 clips — no truncation) scores best *among fitted models* (core R² −7.89 vs the plain
+  baseline −29.56), but §4.3 shows this is because the selected weak-form model is
+  near-null, not because it recovered better dynamics.
 - **Ensemble** (bagged STLSQ) made both state vectors worse.
 - **Second-order** forward-simulation diverges catastrophically on the fair metric.
 
@@ -315,24 +329,46 @@ independent subdomain draws (`n_seeds × K` test functions) to drive the varianc
 At `n_seeds=5` (`seed=7`) the result is a stable, reproducible core R² = **−7.89**.
 Config: `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`.
 
-### 4.3 Decision and interpretation
+### 4.3 Decision and interpretation — the weak-form "win" was an artifact
 
-**On the fair core-position metric, first-order weak-form (multi-seed) is the best model
-and is recommended as operative for biomechanical-position reconstruction.**
+**Corrected decision: no configuration is recommended as operative for position
+reconstruction, because none beats a zero-dynamics baseline.** The plain first-order
+config (`unaligned.handedness`) remains the default for artifact generation only.
 
-Honesty guardrail: weak-form's *whole-state* recon R² (−6.72) is worse than the plain
-baseline's (−2.80). Weak-form trades reconstruction of the high-variance `dominant_wrist_speed`
-column (which inflated the plain baseline's whole-state score) for substantially better
-reconstruction of the 8 core biomechanical positions. Because the core positions are the
-quantities of interest, the fair core metric is the one to optimize — and weak-form wins it
-decisively. If the whole-state number matters for a specific downstream use, the plain
-first-order config remains the better choice there.
+The selected weak-form model has a **single non-bias term** across the whole 10-D state:
 
-The deeper finding still holds: even the best model's `core_position_recon_r2` is negative
-(−7.89), while one-step derivative R² hovers near 0. A single global linear SINDy model
-predicts the *next* step but cannot be free-run for 40 frames on held-out clips — error
-compounds across heterogeneous pitchers/views and noisy broadcast pose. Weak-form narrows
-this gap 3.7× but does not close it.
+```
+d(dominant_knee_flexion_angle)/dt = 0.354 * trail_elbow_flexion_angle
+```
+
+All nine other state derivatives are identically zero. It is the frozen control plus one
+residual term — and it scores *worse* than the true frozen control (−7.89 vs −5.57).
+
+The cause is a degeneracy in `sparsity_weighted_r2`. From the weak-form selection log:
+
+| threshold | terms | validation mean trial R² | selection score |
+|----------:|------:|-------------------------:|----------------:|
+| 0.10 | 37 | −0.008702 | −0.010552 |
+| 0.15 | 23 | −0.008969 | −0.010119 |
+| 0.20 | 13 | −0.009013 | −0.009663 |
+| **0.30** | **2** | **−0.009548** | **−0.009648** |
+| 0.50 | 0 | −0.010045 | −0.010045 |
+
+Every candidate's validation R² lies within a band of width 0.0013 around zero, so the
+accuracy term carries no signal and the sparsity penalty decides outright: threshold 0.30
+beats 0.20 by **1.5e-05**. When all candidates are equally uninformative,
+`sparsity_weighted_r2` reduces to "pick the emptiest model." Selected sparsity levels here
+are therefore not evidence of a parsimonious true model.
+
+Honesty guardrail retained: weak-form's *whole-state* recon R² (−6.72) is worse than the
+plain baseline's (−2.80), because the plain baseline's whole-state score is inflated by the
+high-variance `dominant_wrist_speed` column.
+
+The deeper finding is stronger than previously stated: one-step derivative R² hovers near 0
+*and* no model beats a static predictor over 40 frames. The failure is therefore not solely
+error accumulation from a locally-good model — the models are not locally accurate either.
+A single global sparse fit over 140 heterogeneous, noisy, single-view broadcast clips does
+not recover transferable dynamics.
 
 ### 4.4 Short-horizon analysis (`evaluation.recon_horizons`)
 
@@ -340,24 +376,26 @@ this gap 3.7× but does not close it.
 (default 5/10/20/40 frames) from the same forward simulation, written to `summary.csv` as
 `mean_core_recon_r2_h{H}`. The two models have **opposite** horizon curves:
 
-| horizon (frames) | plain first-order | weak-form (multi-seed) |
-|-----------------:|------------------:|-----------------------:|
-| 5  | −75.5 | **−2.68** |
-| 10 | −47.8 | −5.40 |
-| 20 | −38.0 | −4.90 |
-| 40 | −29.6 | −7.89 |
+| horizon (frames) | plain first-order | weak-form (multi-seed) | frozen control |
+|-----------------:|------------------:|-----------------------:|---------------:|
+| 5  | −75.5 | −2.68 | **−2.16** |
+| 10 | −47.8 | −5.40 | **−2.83** |
+| 20 | −38.0 | −4.90 | **−4.23** |
+| 40 | −29.6 | −7.89 | **−5.57** |
 
-**Weak-form dominates the plain baseline at every horizon — ~28× at h=5.** The plain model's
-noisy coefficients drive the trajectory off course within the first few frames (catastrophic
-on short windows where the positions barely move and the variance denominator is tiny);
-weak-form's robust coefficients track the short-horizon dynamics gracefully and degrade
-slowly. This is exactly the regime SINDy is designed for, and it is the strongest evidence
-that weak-form is the right model.
+**Corrected reading (2026-08-12).** This section previously claimed weak-form's horizon curve
+was "the strongest evidence that weak-form is the right model." With the frozen control added,
+the frozen column dominates *both* fitted models at every horizon. Weak-form beats the plain
+baseline because it is nearly frozen (§4.3), not because it tracks the dynamics — and the
+genuinely frozen model beats it. The horizon curve is still a useful diagnostic, but what it
+diagnoses is that the plain model's noisy coefficients drive the trajectory off course within
+the first few frames, while doing nothing at all is the best strategy available.
 
-Absolute `core_position_recon_r2` stays negative even at h=5 (−2.68): R² is measured against
-the per-window mean, a harsh baseline when the positions are near-constant over a 5-frame
-window. The headline metric is kept at 40-frame reconstruction for continuity; the horizon
-curve is the diagnostic that exposes the qualitative plain-vs-weak-form difference.
+Absolute `core_position_recon_r2` stays negative even at h=5 for every model, including the
+control (−2.16): R² is measured against the per-window mean, a harsh baseline when the
+positions are near-constant over a 5-frame window. This is precisely why the control is
+required — the absolute value of this metric is not interpretable without it. The headline
+metric is kept at 40-frame reconstruction for continuity.
 
 ---
 
