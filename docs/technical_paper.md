@@ -544,7 +544,7 @@ versions are in `requirements.txt`.
 
 [1] G. S. Fleisig, J. R. Andrews, C. J. Dillman, and R. F. Escamilla, "Kinetics of baseball
 pitching with implications about injury mechanisms," *Amer. J. Sports Med.*, vol. 23, no. 2,
-pp. 233-239, Mar./Apr. 1995, doi: 10.1177/036354659502300218.
+pp. 233–239, Mar./Apr. 1995, doi: 10.1177/036354659502300218.
 
 [2] R. M. Kanko, E. K. Laende, E. M. Davis, W. S. Selbie, and K. J. Deluzio, "Concurrent
 assessment of gait kinematics using marker-based and markerless motion capture," *J. Biomech.*,
@@ -552,7 +552,7 @@ vol. 127, art. no. 110665, Oct. 2021, doi: 10.1016/j.jbiomech.2021.110665.
 
 [3] C. Chen, R. Jafari, and N. Kehtarnavaz, "UTD-MHAD: A multimodal dataset for human action
 recognition utilizing a depth camera and a wearable inertial sensor," in *Proc. IEEE Int. Conf.
-Image Process. (ICIP)*, 2015, pp. 168-172, doi: 10.1109/ICIP.2015.7350781.
+Image Process. (ICIP)*, 2015, pp. 168–172, doi: 10.1109/ICIP.2015.7350781.
 
 [4] A. J. Piergiovanni and M. S. Ryoo, "Fine-grained activity recognition in baseball videos,"
 in *Proc. IEEE/CVF Conf. Comput. Vis. Pattern Recognit. (CVPR) Workshops*, 2018. [Online].
@@ -566,12 +566,12 @@ arXiv:1906.08172, 2019. [Online]. Available: https://arxiv.org/abs/1906.08172
 Available: https://arxiv.org/abs/2006.10204
 
 [7] A. Savitzky and M. J. E. Golay, "Smoothing and differentiation of data by simplified least
-squares procedures," *Anal. Chem.*, vol. 36, no. 8, pp. 1627-1639, 1964,
+squares procedures," *Anal. Chem.*, vol. 36, no. 8, pp. 1627–1639, 1964,
 doi: 10.1021/ac60214a047.
 
 [8] S. L. Brunton, J. L. Proctor, and J. N. Kutz, "Discovering governing equations from data by
 sparse identification of nonlinear dynamical systems," *Proc. Nat. Acad. Sci.*, vol. 113,
-no. 15, pp. 3932-3937, Apr. 2016, doi: 10.1073/pnas.1517384113.
+no. 15, pp. 3932–3937, Apr. 2016, doi: 10.1073/pnas.1517384113.
 
 [9] B. M. de Silva, K. Champion, M. Quade, J.-C. Loiseau, J. N. Kutz, and S. L. Brunton,
 "PySINDy: A Python package for the sparse identification of nonlinear dynamical systems from
@@ -582,7 +582,7 @@ identification," *J. Open Source Softw.*, vol. 7, no. 69, art. no. 3994, 2022,
 doi: 10.21105/joss.03994.
 
 [11] D. A. Messenger and D. M. Bortz, "Weak SINDy: Galerkin-based data-driven model selection,"
-*Multiscale Model. Simul.*, vol. 19, no. 3, pp. 1474-1497, 2021, doi: 10.1137/20M1343166.
+*Multiscale Model. Simul.*, vol. 19, no. 3, pp. 1474–1497, 2021, doi: 10.1137/20M1343166.
 
 [12] D. A. Messenger and D. M. Bortz, "Weak SINDy for partial differential equations,"
 *J. Comput. Phys.*, vol. 443, art. no. 110525, 2021, doi: 10.1016/j.jcp.2021.110525.
@@ -592,22 +592,22 @@ model discovery in the low-data, high-noise limit, with active learning and cont
 Roy. Soc. A*, vol. 478, no. 2260, art. no. 20210904, 2022, doi: 10.1098/rspa.2021.0904.
 
 [14] A. H. Murphy, "Skill scores based on the mean square error and their relationships to the
-correlation coefficient," *Mon. Weather Rev.*, vol. 116, no. 12, pp. 2417-2424, Dec. 1988,
+correlation coefficient," *Mon. Weather Rev.*, vol. 116, no. 12, pp. 2417–2424, Dec. 1988,
 doi: 10.1175/1520-0493(1988)116<2417:SSBOTM>2.0.CO;2.
 
 [15] F. Takens, "Detecting strange attractors in turbulence," in *Dynamical Systems and
 Turbulence, Warwick 1980* (Lecture Notes in Mathematics, vol. 898), D. A. Rand and L.-S. Young,
-Eds. Berlin, Germany: Springer, 1981, pp. 366-381, doi: 10.1007/BFb0091924.
+Eds. Berlin, Germany: Springer, 1981, pp. 366–381, doi: 10.1007/BFb0091924.
 
 [16] S. L. Brunton, B. W. Brunton, J. L. Proctor, E. Kaiser, and J. N. Kutz, "Chaos as an
 intermittently forced linear system," *Nature Commun.*, vol. 8, art. no. 19, 2017,
 doi: 10.1038/s41467-017-00030-8.
 
-[17] C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357-362, 2020,
+[17] C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020,
 doi: 10.1038/s41586-020-2649-2.
 
 [18] P. Virtanen et al., "SciPy 1.0: Fundamental algorithms for scientific computing in Python,"
-*Nature Methods*, vol. 17, no. 3, pp. 261-272, 2020, doi: 10.1038/s41592-019-0686-2.
+*Nature Methods*, vol. 17, no. 3, pp. 261–272, 2020, doi: 10.1038/s41592-019-0686-2.
 
 [19] F. Pedregosa et al., "Scikit-learn: Machine learning in Python," *J. Mach. Learn. Res.*,
-vol. 12, pp. 2825-2830, 2011.
+vol. 12, pp. 2825–2830, 2011.
