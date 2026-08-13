@@ -255,6 +255,23 @@ def longtable_to_float(tex: str) -> str:
             after += 1
         pos = after
 
+        # A captioned longtable carries \caption plus a duplicated \endfirsthead block.
+        # IEEE puts the caption above the table, so lift it out of the tabular entirely.
+        caption = ""
+        cidx = body.find("\\caption{")
+        if cidx != -1:
+            cstart = cidx + len("\\caption")
+            cend = _match_brace(body, cstart)
+            caption = body[cstart + 1:cend]
+            body = body[:cidx] + body[cend + 1:]
+            body = body.replace("\\tabularnewline", "", 1)
+            # drop the repeated header that longtable needs and tabular does not
+            fh = body.find("\\endfirsthead")
+            if fh != -1:
+                eh = body.find("\\endhead", fh)
+                if eh != -1:
+                    body = body[:fh] + body[eh + len("\\endhead"):]
+
         body = body.replace("\\endhead", "")
         body = re.sub(r"\\bottomrule\\noalign\{\}\s*\\endlastfoot", "", body)
         body = body.replace("\\endfirsthead", "").strip()
@@ -274,8 +291,9 @@ def longtable_to_float(tex: str) -> str:
         env = "table*" if wide else "table"
         count += 1
         wide_count += 1 if wide else 0
+        cap = f"\\caption{{{caption}}}\n" if caption else ""
         out.append(
-            f"\\begin{{{env}}}[!t]\n\\centering\n"
+            f"\\begin{{{env}}}[!t]\n\\centering\n{cap}"
             f"\\begin{{tabular}}{{{spec}}}\n{body}\n\\end{{tabular}}\n"
             f"\\end{{{env}}}"
         )
@@ -349,7 +367,9 @@ def main() -> None:
 
         cmd = [
             args.pandoc, str(tmp_path / "paper.md"), "-o", str(tmp_path / "paper.tex"),
-            "--from=gfm+tex_math_dollars+smart", "--standalone",
+            # gfm has no table-caption syntax; pandoc markdown supports ": caption" after a table.
+            # autolink_bare_uris keeps the bare DOI/arXiv URLs in the references clickable.
+            "--from=markdown+tex_math_dollars+smart+autolink_bare_uris", "--standalone",
             # Syntax highlighting wraps every token in a macro, and fvextra cannot break
             # inside macro arguments -- long shell commands then overflow the column.
             # IEEE papers are monochrome regardless.

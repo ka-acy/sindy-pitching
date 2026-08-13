@@ -155,6 +155,8 @@ Training summary (`results/equations/baseball/train/summary.csv`, snapshot `trai
 | mean trial derivative R2 (train) | −0.0136 |
 | mean trial derivative RMSE (train) | 10.9599 |
 
+: Training summary for the operative first-order configuration, 111 training clips.
+
 Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`):
 
 | quantity | value |
@@ -167,6 +169,8 @@ Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`):
 | whole-state reconstruction RMSE | 0.7232 |
 | core-position reconstruction R2 | −29.5553 |
 | core-position reconstruction NRMSE | 3.2544 |
+
+: Held-out evaluation of the operative first-order configuration, 29 test clips.
 
 ### 6.2 Model comparison against the frozen control
 
@@ -181,6 +185,8 @@ Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`):
 | second-order, plain | 101 | −2269.04 | 19.1044 | −6.0350 |
 | second-order, ensemble | 131 | −2428.87 | 19.2161 | −6.2521 |
 
+: Held-out comparison of every fitted configuration against the frozen zero-dynamics control. Core R2 degrades monotonically as term count rises.
+
 Short-horizon core R2, plain vs weak-form vs control:
 
 | horizon (frames) | plain first-order | weak-form | frozen control |
@@ -189,6 +195,8 @@ Short-horizon core R2, plain vs weak-form vs control:
 | 10 | −47.81 | −5.4027 | **−2.8330** |
 | 20 | −37.99 | −4.9043 | **−4.2264** |
 | 40 | −29.56 | −7.8922 | **−5.5707** |
+
+: Core-position reconstruction R2 by rollout horizon. The frozen control outscores both fitted models at every horizon.
 
 Three observations follow directly:
 
@@ -216,6 +224,8 @@ The cause is a degeneracy in the model-selection rule. From the weak-form select
 | **0.30** | **2** | **−0.009548** | **−0.009648** |
 | 0.50 | 0 | −0.010045 | −0.010045 |
 
+: Weak-form model selection log. All candidates are indistinguishable in validation R2, so the sparsity penalty decides and threshold 0.30 wins by 1.5e-05.
+
 Every candidate's validation R2 lies in a band of width 0.0013 around zero, so the accuracy term carries no signal. Selection is therefore decided entirely by the sparsity penalty, and threshold 0.30 wins over 0.20 by **1.5e-05**. When all candidates are equally uninformative, `sparsity_weighted_r2` reduces to "prefer the emptiest model." The apparent weak-form victory is an artifact of that rule interacting with a metric that rewards not moving, not evidence that the weak-form fit recovered better dynamics.
 
 This is why the frozen control is necessary. Without it, a near-null model reads as a 3.7x improvement.
@@ -235,6 +245,8 @@ Four candidate explanations for the near-zero derivative fit were tested directl
 | `per_clip_within` (fit early 70%, predict late 30%) | −38.89 | within-clip temporal extrapolation fails |
 | `per_clip_oracle` (in-sample) | +0.2500 | upper bound for a per-clip model |
 
+: Held-out derivative R2 by state representation, plain ridge with GroupKFold over clips. Phase adds nothing; half of the delay-embedding gain is recovered numerical differentiation.
+
 Two conclusions follow.
 
 **The non-autonomous hypothesis is refuted.** Adding normalized phase φ — as an additive term, as a modulating interaction A(φ)x, and as piecewise-in-phase bins — produces no gain in any form. The failure of `dx/dt = f(x)` is not explained by the map being multivalued in phase.
@@ -252,6 +264,8 @@ One-step held-out prediction on the 29 test clips (`src/preprocessing/diagnose_i
 | persistence (no model) | — | 0.0000 | 0.0000 | 0.9680 |
 | delay ridge | next state x(t+1) | 0.2815 | **0.3871** | 0.9777 |
 | delay ridge | increment x(t+1) − x(t) | 0.2816 | **0.3874** | 0.9777 |
+
+: One-step held-out increment prediction. Skill over persistence is positive under both aggregations, while state R2 cannot separate the models.
 
 **This is the project's only positive result that survives its control, and it is positive under both aggregations.** The model captures approximately 39 percent of held-out increment variance beyond persistence.
 
@@ -273,6 +287,8 @@ The same increment model rolled out autoregressively (`results/analysis/incremen
 | 160 | 2.669 | 21 | +0.1517 | −4.13 | −9.30 | −3.16 |
 | 240 | 4.004 | 13 | +0.1438 | −0.4955 | −1.87 | −2.73 |
 
+: Rolled-out increment model against persistence by horizon. Pooled and uniform skill disagree in sign at every horizon, so no multi-step win is claimed.
+
 Pooled skill is positive at every horizon; uniform skill is negative at every horizon, and uniform core R2 favours persistence at every horizon. Per Section 5.5 this is reported as **no multi-step win**. The disagreement is fully explained by the amplitude spread across core columns: pooled sum-of-squares is decided by the large-amplitude angles, on which the model does help, while the small-amplitude columns on which it does badly count equally under uniform averaging.
 
 The H=240 row is the only sign of the crossover one would expect as persistence degrades — core R2 −1.87 against persistence −2.73 — but uniform skill is still negative there and only 13 clips are long enough to qualify. It is recorded as a direction to test with longer clips, not as a result.
@@ -287,6 +303,8 @@ For completeness, the free-running comparison against all controls under a commo
 | `delay_linear` rolled out | −42.08 | the +0.69 derivative representation |
 | `mean_pitch` template | −45.01 | phase-warped mean of the training clips |
 | `constant_velocity` | −1096.28 | extrapolation from the seed velocity |
+
+: Free-running forecast comparison under a common seed and scoring window. The frozen control is the best available method.
 
 The `mean_pitch` result is worth noting on its own: a template asserting that every pitch follows the average training trajectory scores −45.01, so at this pose quality pitching is not stereotyped enough for template matching either.
 
@@ -307,6 +325,8 @@ Per-feature signal and predictability across all 140 clips (`results/analysis/in
 | `dominant_elbow_flexion_angle` | yes | 0.1576 | 0.0690 | 2.28 | 0.4303 |
 | `dominant_wrist_speed` | no | 0.7066 | 0.3184 | 2.22 | 0.3509 |
 
+: Per-feature signal scale, high-frequency residual, and increment autocorrelation across all 140 clips. The noise floor does not bound short-horizon prediction.
+
 Increment lag-1 autocorrelation ranges from 0.35 to 0.88, so increments are far from white and carry genuinely predictable structure; signal-to-noise is 2.2 to 4.4 throughout. **The noise floor does not explain the failures in Sections 6.2 and 6.6**, and short-horizon prediction is not capped by pose quality at this level. Higher-quality pose remains desirable for biomechanical interpretation, but it is not a precondition for the Section 6.5 result.
 
 The residual estimate is an upper bound on achievable precision, not a measurement of raw MediaPipe jitter: the features are already Savitzky-Golay smoothed, so this measures leftover high-frequency content in the modeled features. It is a floor on the floor.
@@ -323,6 +343,8 @@ Uniform skill over persistence, 29 held-out clips:
 | second-order SINDy | position increments | 0.8905 | 0.8908 | ~100% (see below) |
 | second-order SINDy | rate increments (acceleration) | **0.0826** | 0.6911 | **12%** |
 | delay ridge (not SINDy) | position increments | 0.3874 | — | — |
+
+: Fitted SINDy equations on the short-horizon task, against the ceiling set by their own derivative targets.
 
 **The answer is no.** The operative first-order model has no short-horizon skill whatever, despite the derivative targets it is fit against containing 0.70 of extractable skill. It discards all of it.
 
@@ -364,6 +386,8 @@ Two things this work must not claim. The results are not evidence of recovered g
 | delay-embedding derivative R2 +0.69 | unfitted backward difference, +0.35 | roughly half was numerical differentiation |
 | teacher-forced one-step core R2 +0.76 | persistence, +0.85 | dissolved |
 | second-order short-horizon skill +0.89 | its own derivative reference, +0.89 | dissolved; velocity is an input column |
+
+: Intermediate results that did not survive the no-model control for their task.
 
 A further near-miss was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 6.6), and reporting only the pooled figure would have produced another spurious positive. The fourth row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
 
