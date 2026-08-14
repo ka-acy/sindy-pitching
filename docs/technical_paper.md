@@ -4,7 +4,7 @@
 
 This paper develops and validates a reproducible computational pipeline for converting human motion trajectories into sparse nonlinear dynamical models, together with an evaluation protocol in which every reported score is paired with the no-model control for its own task. The workflow uses standardized skeletal pose, biomechanical feature extraction, derivative estimation, and Sparse Identification of Nonlinear Dynamical Systems (SINDy). Stage A validates the pipeline on the UTD-MHAD human action dataset as computational validation only. Stage B applies the workflow to 140 MediaPipe-derived MLB pitching clips from a single broadcast view (111 train / 29 held-out test).
 
-The central result is a separation between two tasks that prior evaluations of this pipeline conflated. **Free-running multi-step reconstruction fails**: no fitted configuration — first-order, second-order, ensemble, or weak-form — outperforms a frozen zero-dynamics predictor, and held-out reconstruction accuracy degrades monotonically with model complexity. **Short-horizon prediction succeeds, but not for the sparse models**: a delay-embedded linear model achieves 0.39 skill over persistence on held-out one-step increments, robust to the choice of error aggregation, and feature increments are strongly autocorrelated (lag-1 0.35 to 0.88) with signal-to-noise 2.2 to 4.4. The fitted STLSQ equations, however, capture almost none of it. A controlled comparison holding design and target fixed shows that dense ridge and the best sparse fit agree to within 0.0003, so sparsification is not the loss; the binding constraint is the state itself. A first-order state of joint positions does not determine its own next increment, and supplying two frames of history raises skill on the identical target from +0.0131 to +0.3874.
+The central result is a separation between two tasks that prior evaluations of this pipeline conflated. **Free-running multi-step reconstruction fails**: no fitted configuration — first-order, second-order, ensemble, or weak-form — outperforms a frozen zero-dynamics predictor, and held-out reconstruction accuracy degrades monotonically with model complexity. **Short-horizon prediction succeeds, but not for the sparse models**: a delay-embedded linear model achieves 0.39 skill over persistence on held-out one-step increments, robust to the choice of error aggregation, and feature increments are strongly autocorrelated (lag-1 0.35 to 0.88) with signal-to-noise 2.2 to 4.4. The fitted STLSQ equations as configured capture almost none of it, but a controlled comparison shows why: dense ridge and the best sparse fit agree to within 0.0003, so sparsification is not the loss — the binding constraint is the state. A first-order state of joint positions does not determine its own next increment. Augmenting the state with recent history and refitting the same sparse estimator yields +0.3881 uniform skill over persistence from 30 terms, matching dense ridge with 240 coefficients and beating an unfitted momentum control at +0.1311.
 
 Four intermediate results in this project were false positives that survived only because the corresponding control or aggregation was missing, and each is documented here alongside the check that overturned it. The contributions are therefore the reproducible framework, the control-paired evaluation protocol, and a characterized boundary between what this data supports (short-horizon predictive structure), what the pipeline's sparse artifacts currently extract from it (almost none), and what is not achievable with these methods (free-running reconstruction, and biomechanical interpretation of discovered equations).
 
@@ -89,7 +89,7 @@ The current Stage B pitching state vector has 10 variables:
 
 Features are canonicalized by handedness: the configuration sets `default_handedness: R` and `infer_handedness_for_pitching: true`, so dominant/trail designations are resolved per clip rather than fixed to a body side. Angles are unwrapped (`angle_unwrap: true`).
 
-Event alignment is **disabled** in the operative configuration (`features.alignment.enabled: false`). An earlier configuration track aligned pitching clips around stride-ankle separation with lead-knee lift as a secondary signal; that track is retained as `config/preprocessing.baseball.aligned.yaml` but is not the operative default. Section 6.9 records why.
+Event alignment is **disabled** in the operative configuration (`features.alignment.enabled: false`). An earlier configuration track aligned pitching clips around stride-ankle separation with lead-knee lift as a secondary signal; that track is retained as `config/preprocessing.baseball.aligned.yaml` but is not the operative default. Section 6.11 records why.
 
 Derivatives are estimated with Savitzky-Golay differentiation using window length 9 and polynomial order 3.
 
@@ -380,7 +380,121 @@ Two consequences for what this paper may claim. First, **the Section 6.5 positiv
 
 Skill figures are comparable *within* a row's own reference, not across the first-order and second-order rows: the two configurations compute positions and derivatives with different Savitzky-Golay paths, so their targets and therefore their ceilings differ (0.7032 versus 0.8908 on the same eight core columns).
 
-### 6.9 Preprocessing-track comparison (superseded)
+### 6.9 Sparse identification does work, once the state carries history
+
+Section 6.8 localizes the failure to the state rather than the estimator. This section tests
+the implied fix: fit the project's own sparse estimator, STLSQ, on a delay-augmented state and
+score it against persistence. Design is `[x(t), delta(t-1), ..., delta(t-d+1)]`, target is the
+next-frame increment of the eight core positions, and history depth is swept rather than
+assumed (`src/analysis/fit_delay_sindy.py`, `results/analysis/delay_sindy/`).
+
+| history depth | design dims | STLSQ terms at thr 0.05 | skill (pooled) | skill (uniform) |
+|---:|---:|---:|---:|---:|
+| 1 (no history) | 10 | 8 | +0.0155 | +0.0109 |
+| 2 | 20 | 21 | +0.2685 | +0.3739 |
+| 3 | 30 | 30 | **+0.2817** | **+0.3881** |
+| 4 | 40 | 33 | +0.2808 | +0.3884 |
+| 5 | 50 | 38 | +0.2781 | +0.3858 |
+
+: Sparse skill over persistence by history depth. Almost all of the gain arrives with the first frame of history, and the curve saturates by depth 3.
+
+**Sparse identification retains essentially all of the available skill.** At depth 3 a
+30-term sparse model scores +0.3881 uniform against dense ridge's +0.3877 with 240
+coefficients {D} the sparse fit is not worse, and it is an order of magnitude smaller. This is
+the first result in this project that belongs to the pipeline's own method rather than to a
+baseline.
+
+**It also beats the unfitted momentum control, which is the bar that matters here.** Every
+discovered equation is dominated by the target's own previous increment, so the relevant
+control is not persistence but momentum {D} a joint continuing to move as it was moving,
+which requires no fitting at all:
+
+| model | terms | skill (pooled) | skill (uniform) |
+|---|---:|---:|---:|
+| persistence, zero increment | 0 | 0.0000 | 0.0000 |
+| momentum, `delta_hat(t) = delta(t-1)` | 0 | -0.0643 | +0.1311 |
+| momentum, constant acceleration | 0 | -1.5219 | -0.9712 |
+| sparse STLSQ, self terms only | 20 | +0.2645 | +0.3713 |
+| sparse STLSQ, all terms | 30 | **+0.2817** | **+0.3881** |
+
+: Fitted sparse models against unfitted momentum controls, depth 3, threshold 0.05. The fit adds 0.257 uniform skill over the strongest unfitted control, so the result is not merely momentum.
+
+The fitted model clears the momentum control by 0.257 uniform, and both aggregations agree in
+sign for the first time in this project's forecasting results. Constant-acceleration
+extrapolation is far worse than either, which is consistent with the noise level in the
+increments.
+
+**Cross-joint coupling contributes, but weakly.** Restricting each equation to terms built
+from its own variable costs 0.0168 uniform and 0.0172 pooled (+0.3713 against +0.3881). The
+coupling is therefore real and consistent across both aggregations, but it accounts for
+roughly four percent of the model's skill. The discovered structure is suggestive:
+
+```
+delta(shoulder_rotation_angle) = +0.373*d1(shoulder_rotation_angle) +0.185*d1(hip_rotation_angle)
+delta(hip_rotation_angle)      = +0.508*d1(hip_rotation_angle)      +0.092*d1(shoulder_rotation_angle)
+```
+
+The hip-to-shoulder coefficient is roughly twice the shoulder-to-hip coefficient, an asymmetry
+in the direction the proximal-to-distal kinetic chain would predict [1], and
+`stride_ankle_separation` picks up a `lead_knee_lift` term. **This is not offered as evidence
+for the kinetic chain.** The effect size is small, it rests on a single train/test split with
+no confidence interval, and no permutation test has been run on the coupling contribution.
+Testing whether the 0.017 coupling gain survives a label-free null is listed in Section 10 and
+must be done before any biomechanical reading is defensible.
+
+### 6.10 Label-validated representation study: predicting release velocity and pitch type
+
+Every result above judges the pipeline by self-prediction of the motion. The clips also carry
+labels external to the pose — `pitch_speed_mph` (82.1 to 102.7, mean 91.3) and `pitch_type`
+— which the dynamics pipeline never uses. This section asks whether the representations
+encode structure that predicts them. A positive answer would be the first validation of this
+pipeline against a quantity outside its own trajectories.
+
+The protocol was fixed before any result was inspected:
+
+- **Primary endpoint** T1, `pitch_speed_mph` regression, RidgeCV, cross-validated R2.
+- **Reference** R0, a 70-dimensional kinematic summary (per-feature mean, spread, extremes,
+  peak timing, mean per-frame speed) containing no dynamical model. Any dynamical
+  representation must beat it to be interesting.
+- **Secondary** T2, binary fast (fastball, sinker; 44 clips) versus offspeed (changeup,
+  curveball, knucklecurve, slider; 96 clips), balanced accuracy.
+- **Significance** permutation null on the labels. A result counts only if it beats both the
+  trivial baseline and the null.
+
+All 140 clips, 5-fold stratified cross-validation repeated 20 times, 200 permutations, PCA at
+0.95 variance applied identically to every representation
+(`src/analysis/run_representation_study.py`, `results/analysis/representation_study/`).
+
+| representation | task | score | 95% CI | baseline | p |
+|---|---|---:|---|---:|---:|
+| R0 kinematic summary (reference) | T1 speed, CV R2 | -0.0179 | [-0.027, -0.009] | -0.0035 | 0.63 |
+| R1 per-clip SINDy coefficients | T1 speed, CV R2 | -0.0218 | [-0.035, -0.009] | -0.0035 | 0.63 |
+| R0 kinematic summary (reference) | T2 class, bal. acc. | 0.4546 | [0.437, 0.472] | 0.4919 | 0.82 |
+| R1 per-clip SINDy coefficients | T2 class, bal. acc. | 0.5504 | [0.531, 0.570] | 0.4919 | 0.19 |
+
+: Label-prediction results against baseline and permutation null. The pre-registered primary endpoint is null for both representations.
+
+**The primary endpoint is null.** Neither representation predicts release velocity: mean
+absolute error is 5.35 mph against a 5.32 mph mean-predictor baseline, and both p-values are
+0.63. R0 fails as well, so this is not a case of dynamics failing to add value over a
+kinematic summary — there is no velocity signal in either.
+
+**The secondary endpoint illustrates why the null matters.** R1's balanced accuracy of 0.5504
+has a 95% confidence interval that excludes the 0.4919 baseline, which reads as a win. Its
+permutation p-value is 0.19. The permutation test is the correct arbiter: cross-validation
+folds share data, so the interval across repeats understates uncertainty, while the
+permutation null is computed through the identical pipeline on shuffled labels. Reported as
+null. Component importances were not examined, because interpreting coefficient loadings
+under a null result would be fishing.
+
+**Interpretation.** With 140 clips against 70 to 110 dimensions and a 5.3 mph baseline spread,
+only a large effect is detectable, so absence of signal here cannot be distinguished from
+insufficient power. Piergiovanni and Ryoo [4] attempt the same prediction from the same
+broadcast footage and describe it as extremely difficult, which is consistent. This endpoint
+should be revisited if the clip pool grows substantially, and is reported here as a
+pre-registered negative rather than omitted.
+
+### 6.11 Preprocessing-track comparison (superseded)
 
 An earlier aligned-versus-unaligned comparison (`results/evaluation/baseball/config_comparison.csv`) reported the unaligned track at 78 terms / whole-state R2 −4.8905 and the aligned track at 98 terms / whole-state R2 −2.4099. That comparison predates both the restored 140-clip pool and the core-position metric, and it ranked tracks on the whole-state score that Section 5.5 shows is not comparable across configurations. It is retained for history and is **not** the basis of the current operative choice. The alignment track has not been re-scored under the current pool and metric; doing so is listed in Section 10.
 
@@ -398,7 +512,7 @@ These are consistent, not contradictory. Section 6.6 shows the mechanism directl
 
 The defensible claim is:
 
-> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented end-to-end, together with a state-comparable reconstruction metric and a control-paired evaluation protocol in which every reported score is compared against the no-model baseline for its own task. Under that protocol three findings separate. First, no fitted configuration — first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades monotonically with model complexity. Second, the data does carry short-horizon structure: a delay-embedded linear model achieves 0.39 skill over persistence on held-out increment prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88 rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that structure, retaining 0 percent (first-order) to 12 percent (second-order, acceleration) of the skill present in the derivative targets they are fit against. The substantive finding is this boundary together with the localization of the loss to the sparse fit and its selection rule, not to the pose, the features, the derivative estimation, or the metric.
+> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented end-to-end, together with a state-comparable reconstruction metric and a control-paired evaluation protocol in which every reported score is compared against the no-model baseline for its own task. Under that protocol three findings separate. First, no fitted configuration — first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades monotonically with model complexity. Second, the data does carry short-horizon structure: a delay-embedded linear model achieves 0.39 skill over persistence on held-out increment prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88 rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that structure as configured, but the cause is the state and not the estimator: refitting the same sparse estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30 terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. The substantive finding is this boundary together with the localization of the loss to the sparse fit and its selection rule, not to the pose, the features, the derivative estimation, or the metric.
 
 Two things this work must not claim. The results are not evidence of recovered governing laws of pitching mechanics: 26 coefficients that predict increments 39 percent better than persistence are not a biomechanical model, and the discovered equations have not been validated against any external quantity. And the weak-form configuration must not be presented as a successful model.
 
@@ -510,6 +624,26 @@ done
   --column-set rates
 ```
 
+Reproduce Section 6.9 (sparse fit on a delay-augmented state, with the momentum controls
+and the coupling ablation):
+
+```bash
+./.venv/bin/python src/analysis/fit_delay_sindy.py
+```
+
+Reproduce Section 6.10 (label-validated representation study). This runs 200 permutations per
+representation per task and takes several minutes; `--quick` reduces it for a smoke run:
+
+```bash
+./.venv/bin/python src/analysis/run_representation_study.py
+```
+
+Reproduce the Section 6.8 estimator comparison:
+
+```bash
+./.venv/bin/python src/analysis/diagnose_sparse_fit_loss.py
+```
+
 Compare multiple configurations in one run:
 
 ```bash
@@ -538,6 +672,10 @@ Primary generated outputs:
 - `results/analysis/increment_skill/part_c_noise_floor.csv`
 - `results/analysis/sindy_increment_skill.csv`
 - `results/analysis/sindy_increment_skill_second_order_rates.csv`
+- `results/analysis/sparse_fit_loss.csv`
+- `results/analysis/delay_sindy/skill_by_depth.csv`
+- `results/analysis/delay_sindy/equations.txt`
+- `results/analysis/representation_study/comparison.csv`
 
 ## 9. Limitations
 
@@ -551,22 +689,26 @@ Primary generated outputs:
 - Skill over persistence measures prediction of increments. It is not a biomechanical validity measure, and 0.39 skill does not imply the fitted coefficients correspond to real biomechanical relationships.
 - The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
+- The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
+- The cross-joint coupling contribution in Section 6.9 is 0.017 uniform skill, roughly four percent of that model's total. No significance test has been run on it, so the hip-to-shoulder asymmetry is an observation and not a finding.
+- The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
 - The system identifies sparse equations from measured features; it does not prove causal biomechanical mechanisms.
 
 ## 10. Next Work
 
-1. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
-2. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
-3. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
-4. Replace or repair the model-selection rule so that it does not reduce to term-count minimization when candidate accuracies are statistically indistinguishable; require a minimum accuracy margin before the sparsity penalty is allowed to decide.
-5. Report confidence intervals across repeated train/test splits rather than relying on one split.
-6. Extend the horizon sweep with longer clips to test whether the crossover hinted at H=240 is real.
-7. Re-score the alignment track under the current pool and the core-position metric (Section 6.8).
-8. Add automated pose-quality metrics and exclude low-confidence or heavily occluded clips.
-9. Add figures: observed versus reconstructed trajectories with the frozen control drawn for reference, and a skill-versus-horizon curve with persistence at zero.
-10. Pursue the label-validated representation study (`docs/superpowers/specs/2026-06-23-representation-study-design.md`), which asks whether these representations predict release speed and pitch type. Given Section 6.5, the relevant question is now whether the short-horizon structure is the same structure that carries label information.
+1. Test whether the 0.017 coupling contribution of Section 6.9 survives a null. Permute the non-self columns of the design within clips and recompute the coupling gain; report a p-value and a confidence interval across repeated splits. Until that is done the hip-to-shoulder asymmetry is an observation, not a finding, and no biomechanical reading of the discovered terms is defensible.
+2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
+3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
+4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
+5. Replace or repair the model-selection rule so that it does not reduce to term-count minimization when candidate accuracies are statistically indistinguishable; require a minimum accuracy margin before the sparsity penalty is allowed to decide.
+6. Report confidence intervals across repeated train/test splits rather than relying on one split.
+7. Extend the horizon sweep with longer clips to test whether the crossover hinted at H=240 is real.
+8. Re-score the alignment track under the current pool and the core-position metric (Section 6.8).
+9. Add automated pose-quality metrics and exclude low-confidence or heavily occluded clips.
+10. Add figures: observed versus reconstructed trajectories with the frozen control drawn for reference, and a skill-versus-horizon curve with persistence at zero.
+11. Pursue the label-validated representation study (`docs/superpowers/specs/2026-06-23-representation-study-design.md`), which asks whether these representations predict release speed and pitch type. Given Section 6.5, the relevant question is now whether the short-horizon structure is the same structure that carries label information.
 
 Explicitly deprioritized on the evidence in Section 6.4: per-pitcher, per-pitch-type, and per-phase conditioning (the per-clip oracle result shows heterogeneity is not the constraint); non-autonomous or phase-augmented state vectors (no gain in three forms); and further model-class substitution on the current feature set.
 
