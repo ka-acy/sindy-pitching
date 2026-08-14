@@ -436,11 +436,47 @@ delta(hip_rotation_angle)      = +0.508*d1(hip_rotation_angle)      +0.092*d1(sh
 
 The hip-to-shoulder coefficient is roughly twice the shoulder-to-hip coefficient, an asymmetry
 in the direction the proximal-to-distal kinetic chain would predict [1], and
-`stride_ankle_separation` picks up a `lead_knee_lift` term. **This is not offered as evidence
-for the kinetic chain.** The effect size is small, it rests on a single train/test split with
-no confidence interval, and no permutation test has been run on the coupling contribution.
-Testing whether the 0.017 coupling gain survives a label-free null is listed in Section 10 and
-must be done before any biomechanical reading is defensible.
+`stride_ankle_separation` picks up a `lead_knee_lift` term.
+
+**That asymmetry is not a finding, and the coupling gain does not survive testing.**
+`src/analysis/test_coupling_significance.py` subjects it to two tests
+(`results/analysis/coupling_significance/`). The statistic is the gain itself: uniform skill
+with all terms minus uniform skill with each equation restricted to its own variable's history.
+
+The null circularly rolls, within each clip, every design column that is not part of the target
+variable, then refits and recomputes the gain. The roll has to be applied *per target*: any
+cross-joint column is some other target's self column, so a single shared mask leaves nearly all
+of them untouched. A circular roll also preserves each column's marginal distribution and
+autocorrelation, where a plain row shuffle would destroy the smoothness that makes these columns
+predictive at all and so give an unrealistically easy null.
+
+| held-out split | observed gain | null mean | null sd | p |
+|---:|---:|---:|---:|---:|
+| 1 | -0.0016 | -0.0004 | 0.0008 | 0.934 |
+| 2 | +0.0010 | -0.0004 | 0.0014 | 0.016 |
+| 3 | -0.0059 | -0.0003 | 0.0008 | 1.000 |
+| 4 | +0.0120 | -0.0001 | 0.0002 | 0.016 |
+| 5 | +0.0138 | -0.0001 | 0.0004 | 0.016 |
+
+: Per-target circular-shift null, 60 draws on each of five independent held-out splits. The gain clears the null on three splits and is negative on two, so it is split-dependent rather than reliable.
+
+Across 20 random clip-level resplits the gain averages +0.0075 with a 95% confidence interval
+of [+0.0052, +0.0097]. But the null test shows its sign varies across held-out splits: it is
+negative on two of five, and clears the null on three of five. An effect that reverses sign
+depending on which clips are held out is not a basis for a biomechanical claim, and roughly
+0.008 of skill against the model's 0.388 total is about two percent either way.
+
+The honest reading is that essentially all of this model's skill is each joint's own momentum,
+and the cross-joint terms contribute a small, unstable remainder. **The hip-to-shoulder
+asymmetry is therefore reported as an observation about the fitted coefficients, not as evidence
+for the kinetic chain.** Establishing it would need more clips and a stable effect across
+splits.
+
+One further caveat surfaced by the resplit test: the unrestricted 30-column fit **diverged on 2
+of 20 random splits**, producing predictions of order 1e6, because the level and increment
+columns are collinear and STLSQ's ridge term is small. Those splits are excluded and counted
+rather than averaged in. The 30-term model is therefore not robustly conditioned on training
+sets of this size — another reason to treat its smaller coefficients cautiously.
 
 ### 6.10 Label-validated representation study: predicting release velocity and pitch type
 
@@ -644,6 +680,12 @@ Reproduce the Section 6.8 estimator comparison:
 ./.venv/bin/python src/analysis/diagnose_sparse_fit_loss.py
 ```
 
+Reproduce the Section 6.9 coupling test (five held-out splits, 60 null draws each):
+
+```bash
+./.venv/bin/python src/analysis/test_coupling_significance.py --n-null 60 --null-splits 5
+```
+
 Compare multiple configurations in one run:
 
 ```bash
@@ -675,6 +717,7 @@ Primary generated outputs:
 - `results/analysis/sparse_fit_loss.csv`
 - `results/analysis/delay_sindy/skill_by_depth.csv`
 - `results/analysis/delay_sindy/equations.txt`
+- `results/analysis/coupling_significance/summary.json`
 - `results/analysis/representation_study/comparison.csv`
 
 ## 9. Limitations
@@ -690,7 +733,8 @@ Primary generated outputs:
 - The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
-- The cross-joint coupling contribution in Section 6.9 is 0.017 uniform skill, roughly four percent of that model's total. No significance test has been run on it, so the hip-to-shoulder asymmetry is an observation and not a finding.
+- The cross-joint coupling contribution in Section 6.9 averages 0.0075 uniform skill, about two percent of that model's total, and its sign reverses across held-out splits. It clears a circular-shift null on three of five splits. The hip-to-shoulder asymmetry is an observation about fitted coefficients, not evidence for the kinetic chain.
+- The 30-term delay model is not robustly conditioned: the unrestricted fit diverged on 2 of 20 random clip-level splits. Its larger self-momentum terms are stable across splits; its smaller cross-joint terms are not.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
@@ -698,7 +742,7 @@ Primary generated outputs:
 
 ## 10. Next Work
 
-1. Test whether the 0.017 coupling contribution of Section 6.9 survives a null. Permute the non-self columns of the design within clips and recompute the coupling gain; report a p-value and a confidence interval across repeated splits. Until that is done the hip-to-shoulder asymmetry is an observation, not a finding, and no biomechanical reading of the discovered terms is defensible.
+1. Stabilize the delay model before extending it. Two problems surfaced in Section 6.9: the unrestricted fit diverges on about one split in ten, and the cross-joint contribution reverses sign across held-out splits. Both point at collinearity between the level and increment columns. Try an increment-only design, a stronger ridge term inside STLSQ, or orthogonalized delay coordinates, and re-test the coupling gain once the fit is stable.
 2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
 3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
 4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
