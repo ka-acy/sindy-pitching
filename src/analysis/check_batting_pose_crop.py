@@ -42,7 +42,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.analysis.check_batting_pose_feasibility import load_batting  # reuse sampling
+from src.analysis.check_batting_pose_feasibility import load_batting, outcome_of
 
 MODEL = PROJECT_ROOT / "data/models/pose_landmarker_full.task"
 L_SHOULDER, R_SHOULDER, L_HIP, R_HIP = 11, 12, 23, 24
@@ -60,7 +60,33 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--frames-out", default="results/analysis/batting_feasibility/crop_frames")
     p.add_argument("--output-csv", default="results/analysis/batting_feasibility/crop_summary.csv")
     p.add_argument("--save-frames-per-clip", type=int, default=1)
+    p.add_argument("--media-root", default="",
+                   help="Directory holding the .mp4 files. Defaults to the segmented tree; "
+                        "point it at a local cache when that volume is unavailable.")
+    p.add_argument("--clip-ids-file", default="",
+                   help="Newline-separated clip ids to use verbatim instead of resampling. "
+                        "Use the ids from the full-frame run so the comparison is on the same clips.")
     return p.parse_args()
+
+
+def load_named(clip_ids: list[str], media_root: Path) -> list[dict]:
+    """Load specific clips by id from a given media root, keeping their outcome labels."""
+    manifest = PROJECT_ROOT / "data/baseball/metadata/clip_manifest.csv"
+    wanted = set(clip_ids)
+    by_id: dict[str, dict] = {}
+    with manifest.open(newline="") as fh:
+        for r in csv.DictReader(fh):
+            if r["clip_id"] not in wanted or r["task_type"] != "batting":
+                continue
+            try:
+                notes = json.loads(r["notes"])
+            except Exception:
+                notes = {}
+            path = media_root / f"{r['clip_id']}.mp4"
+            if path.exists():
+                by_id[r["clip_id"]] = {"clip_id": r["clip_id"], "path": path,
+                                       "outcome": outcome_of(notes.get("labels", []))}
+    return [by_id[i] for i in clip_ids if i in by_id]
 
 
 def main() -> None:
@@ -73,7 +99,17 @@ def main() -> None:
     from mediapipe.tasks.python import vision as mp_vision
 
     x0f, y0f, x1f, y1f = (float(v) for v in args.crop.split(","))
-    clips = load_batting(args.n_clips, args.seed)
+    if args.clip_ids_file:
+        ids = [l.strip() for l in Path(args.clip_ids_file).read_text().split("\n") if l.strip()]
+        root = Path(args.media_root) if args.media_root else None
+        if root and not root.is_absolute():
+            root = PROJECT_ROOT / root
+        clips = load_named(ids, root or Path("/mnt/e/MML_RESEARCH/SEGMENTED/segmented"))
+        print(f"using {len(clips)} of {len(ids)} named clips from {root}")
+    else:
+        clips = load_batting(args.n_clips, args.seed)
+    if not clips:
+        raise SystemExit("no batting clips found; check --media-root / --clip-ids-file")
     print(f"checking {len(clips)} batting clips, crop=({x0f},{y0f})-({x1f},{y1f}), "
           f"upscale={args.upscale}x")
 

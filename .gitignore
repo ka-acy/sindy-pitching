@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.so
+.DS_Store
+
+# Local archives and downloads
+*.zip
+
+# Generated research artifacts
+data/**/raw/
+data/**/processed/
+data/**/external_pose/
+results/
+
+# Model and array artifacts
+*.npz
+*.npy
+*.pkl
+
+# Local copies of source video, pulled from the external segmented tree when that volume
+# is unavailable. Media is never committed.
+data/**/local_media_cache/
+*.mp4
