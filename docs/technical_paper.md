@@ -472,11 +472,44 @@ asymmetry is therefore reported as an observation about the fitted coefficients,
 for the kinetic chain.** Establishing it would need more clips and a stable effect across
 splits.
 
-One further caveat surfaced by the resplit test: the unrestricted 30-column fit **diverged on 2
-of 20 random splits**, producing predictions of order 1e6, because the level and increment
-columns are collinear and STLSQ's ridge term is small. Those splits are excluded and counted
-rather than averaged in. The 30-term model is therefore not robustly conditioned on training
-sets of this size — another reason to treat its smaller coefficients cautiously.
+**Instability, diagnosed and fixed.** The unrestricted 30-column fit diverged on 2 of 40 random
+clip-level splits, producing predictions of order 1e4 against true increments of order 1. On a
+diverging split the design has condition number 3.0e6 (smallest singular value 8.6e-5) and the
+fitted coefficients reach ±6773 on exactly three columns — `d1(shoulder_rotation_angle)`,
+`d1(hip_rotation_angle)` and `d1(hip_shoulder_separation_angle)` — which cancel. On a healthy
+split the same design has condition number 6.1 and coefficients of order 0.4.
+
+The cause is that `hip_shoulder_separation_angle` is *derived*: it is shoulder rotation minus hip
+rotation. Pooled over all 140 clips the identity is not exact (residual standard deviation 1.03
+against the feature's own 1.11, and the ten-feature matrix has condition number 51 at full rank),
+which is why it is invisible in aggregate. It holds near-exactly on *some clip subsets*, so a
+training draw that happens to contain mostly such clips is rank-deficient in those three columns,
+and least squares answers with enormous cancelling coefficients that do not transfer.
+
+`src/analysis/stabilize_delay_fit.py` compares candidate fixes over the same 40 splits
+(`results/analysis/delay_sindy/stability.csv`):
+
+| variant | dims | diverged | skill | 95% CI | terms |
+|---|---:|---:|---:|---|---:|
+| baseline | 30 | 2/40 | +0.3813 | [+0.3676, +0.3951] | 33.6 |
+| STLSQ ridge alpha 1e-1 / 1.0 / 1e3 | 30 | 2/40 | +0.3820 | [+0.3682, +0.3957] | 32.8 |
+| levels centred per clip | 30 | 2/40 | +0.3852 | [+0.3716, +0.3988] | 34.6 |
+| increments only | 20 | 2/40 | +0.3678 | [+0.3536, +0.3819] | 24.2 |
+| PCA-whitened design | 30 | **0/40** | +0.3720 | [+0.3593, +0.3846] | 110.7 |
+| **drop `hip_shoulder_separation_angle`** | 27 | **0/40** | **+0.3805** | [+0.3670, +0.3940] | 32.1 |
+
+: Candidate fixes for the divergence, evaluated over identical splits. Only removing the derived feature or whitening the design eliminates it; removing the derived feature costs nothing and keeps the terms interpretable.
+
+Raising STLSQ's ridge parameter does not help even at alpha = 1e3, which rules out ordinary
+ill-conditioning as the mechanism and confirms a genuine rank deficiency. Whitening fixes it but
+replaces 32 physical terms with 111 principal components and costs 0.009 skill. **Dropping the
+derived feature is the operative fix**: divergence goes to zero at a cost of 0.0009 skill, well
+inside the confidence interval, and the model stays interpretable. Nothing is lost by removing
+it, since the two rotations that define it remain in the design and it is not a target column.
+
+The delay model is therefore stable at 27 design dimensions and about 32 terms. The coupling
+analysis above predates this fix, which is why it had to exclude diverging splits by hand;
+repeating it on the stabilized design is listed in Section 10.
 
 ### 6.10 Label-validated representation study: predicting release velocity and pitch type
 
@@ -686,6 +719,12 @@ Reproduce the Section 6.9 coupling test (five held-out splits, 60 null draws eac
 ./.venv/bin/python src/analysis/test_coupling_significance.py --n-null 60 --null-splits 5
 ```
 
+Reproduce the Section 6.9 stability comparison:
+
+```bash
+./.venv/bin/python src/analysis/stabilize_delay_fit.py --n-splits 40
+```
+
 Compare multiple configurations in one run:
 
 ```bash
@@ -718,6 +757,7 @@ Primary generated outputs:
 - `results/analysis/delay_sindy/skill_by_depth.csv`
 - `results/analysis/delay_sindy/equations.txt`
 - `results/analysis/coupling_significance/summary.json`
+- `results/analysis/delay_sindy/stability.csv`
 - `results/analysis/representation_study/comparison.csv`
 
 ## 9. Limitations
@@ -734,7 +774,7 @@ Primary generated outputs:
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
 - The cross-joint coupling contribution in Section 6.9 averages 0.0075 uniform skill, about two percent of that model's total, and its sign reverses across held-out splits. It clears a circular-shift null on three of five splits. The hip-to-shoulder asymmetry is an observation about fitted coefficients, not evidence for the kinetic chain.
-- The 30-term delay model is not robustly conditioned: the unrestricted fit diverged on 2 of 20 random clip-level splits. Its larger self-momentum terms are stable across splits; its smaller cross-joint terms are not.
+- The delay model's divergence on some splits is fixed by dropping the derived `hip_shoulder_separation_angle` from the design (Section 6.9), but the coupling analysis was run before that fix and excluded diverging splits by hand. Its conclusion is unaffected in direction, though the numbers would be cleaner on the stabilized design.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
@@ -742,7 +782,7 @@ Primary generated outputs:
 
 ## 10. Next Work
 
-1. Stabilize the delay model before extending it. Two problems surfaced in Section 6.9: the unrestricted fit diverges on about one split in ten, and the cross-joint contribution reverses sign across held-out splits. Both point at collinearity between the level and increment columns. Try an increment-only design, a stronger ridge term inside STLSQ, or orthogonalized delay coordinates, and re-test the coupling gain once the fit is stable.
+1. Repeat the coupling test of Section 6.9 on the stabilized 27-column design. The instability that forced diverging splits to be excluded by hand is now fixed, so the resplit confidence interval and the shift null can both be computed without exclusions. The expected conclusion is unchanged, but the numbers would no longer carry a hand-applied filter.
 2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
 3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
 4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
