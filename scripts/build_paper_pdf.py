@@ -56,15 +56,19 @@ KEYWORDS = (
     "sports biomechanics, model evaluation, baseline controls, time-series forecasting"
 )
 
+# Math symbols are emitted via \ensuremath rather than $...$ on purpose. Pandoc will not
+# parse a closing "$" that is immediately followed by a digit, so "$\pm$6773" was escaped to
+# literal "\$\pm\$6773", putting \pm into text mode and producing a 207pt runaway box.
+# \ensuremath works in either mode and is immune to what follows it.
 UNICODE_MAP = {
     "−": "-",              # minus sign
     "–": "--",             # en dash
-    "→": r"$\rightarrow$",
-    "φ": r"$\varphi$",
-    "τ": r"$\tau$",
-    "₁": r"$_1$",
-    "Δ": r"$\Delta$",
-    "±": r"$\pm$",
+    "→": r"\ensuremath{\rightarrow}",
+    "φ": r"\ensuremath{\varphi}",
+    "τ": r"\ensuremath{\tau}",
+    "₁": r"\ensuremath{_1}",
+    "Δ": r"\ensuremath{\Delta}",
+    "±": r"\ensuremath{\pm}",
 }
 
 ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII",
@@ -124,6 +128,7 @@ end
 """
 
 PREAMBLE_COMMON = r"""
+\usepackage{textcomp}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{etoolbox}
