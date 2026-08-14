@@ -64,6 +64,7 @@ UNICODE_MAP = {
     "τ": r"$\tau$",
     "₁": r"$_1$",
     "Δ": r"$\Delta$",
+    "±": r"$\pm$",
 }
 
 ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII",
