@@ -477,11 +477,51 @@ deviations above chance. The cross-joint terms therefore do carry information.
 remains each joint's own momentum. More importantly, detecting that shoulder motion is predicted
 in part by hip motion is not a discovery: the hips and shoulders are mechanically linked through
 the trunk, and any whole-body coordination would produce it. The proximal-to-distal kinetic chain
-is a claim about *direction and precedence*, and what would evidence it is the **asymmetry** —
-hip-to-shoulder at +0.185 against shoulder-to-hip at +0.092. That asymmetry has not been tested.
-The null here asks whether cross-joint terms help at all, not whether one direction dominates the
-other beyond chance. Section 10 records that test as the precondition for any biomechanical
-reading, and until it is run the asymmetry remains an observation about fitted coefficients.
+is a claim about *direction and precedence*, so it was tested directly.
+
+**The directional asymmetry does not survive.** `src/analysis/test_kinetic_chain_asymmetry.py`
+orders the state variables from the ground up — `stride_ankle_separation` < `lead_knee_lift` <
+knee flexion < `hip_rotation_angle` < `shoulder_rotation_angle` < elbow flexion <
+`dominant_wrist_speed` — and for each equation splits the cross-joint columns into those from
+more proximal variables and those from more distal ones. Segments at the same level of the chain
+count for neither direction. Three models are fitted per split, and the statistic is
+
+```
+asym = [skill(self + proximal-to-distal) - skill(self)]
+     - [skill(self + distal-to-proximal) - skill(self)]
+```
+
+The two directions offer very different numbers of columns to different targets — 15, 12, 18,
+18, 6, 6, 3, 0 proximal sources against 9, 12, 3, 3, 15, 15, 21, 24 distal ones — so a raw
+comparison would largely measure that imbalance. The shift null preserves the counts and centres
+the asymmetry on zero regardless.
+
+Across 30 resplits: proximal-to-distal gains +0.0033, distal-to-proximal gains +0.0022, and the
+asymmetry is **+0.0011 with a 95% confidence interval of [-0.0004, +0.0026], positive on 18 of 30
+splits**. Eighteen of thirty is close to a coin flip, and the interval includes zero.
+
+| held-out split | observed asymmetry | null mean | null sd | p |
+|---:|---:|---:|---:|---:|
+| 1 | +0.0040 | +0.0000 | 0.0001 | 0.016 |
+| 2 | +0.0026 | +0.0000 | 0.0003 | 0.016 |
+| 3 | +0.0128 | +0.0000 | 0.0002 | 0.016 |
+| 4 | +0.0016 | +0.0000 | 0.0002 | 0.016 |
+| 5 | -0.0020 | +0.0001 | 0.0002 | 1.000 |
+
+: Shift null on the directional asymmetry, 60 draws on each of five splits. Four splits clear the null, but the resplit interval includes zero and only 18 of 30 splits are positive.
+
+The two tests disagree, and the disagreement is itself worth recording. The null distributions are
+extremely tight (standard deviations of 1e-4), so any small positive observation clears them; the
+null asks only whether the gain differs from shifted-column chance on *that* split. The resplit
+interval asks whether the effect is consistently positive across different held-out data, which is
+the question that matters for generalization, and it answers no. Where a tight null and a
+split-to-split interval disagree, this paper follows the interval.
+
+**Conclusion on the kinetic chain: not evidenced.** The asymmetry is roughly 0.3 percent of the
+model's skill and its sign varies across splits. The fitted hip-to-shoulder coefficient being
+about twice shoulder-to-hip is a property of one coefficient pair in one fit, not a directional
+effect recoverable from held-out prediction. This paper therefore makes no biomechanical claim
+about proximal-to-distal sequencing.
 
 **Instability, diagnosed and fixed.** The unrestricted 30-column fit diverged on 2 of 40 random
 clip-level splits, producing predictions of order 1e4 against true increments of order 1. On a
@@ -736,6 +776,12 @@ Reproduce the Section 6.9 stability comparison:
 ./.venv/bin/python src/analysis/stabilize_delay_fit.py --n-splits 40
 ```
 
+Reproduce the Section 6.9 directional asymmetry test:
+
+```bash
+./.venv/bin/python src/analysis/test_kinetic_chain_asymmetry.py --n-null 60 --null-splits 5
+```
+
 Compare multiple configurations in one run:
 
 ```bash
@@ -769,6 +815,7 @@ Primary generated outputs:
 - `results/analysis/delay_sindy/equations.txt`
 - `results/analysis/coupling_significance/summary.json`
 - `results/analysis/delay_sindy/stability.csv`
+- `results/analysis/kinetic_chain_asymmetry/summary.json`
 - `results/analysis/representation_study/comparison.csv`
 
 ## 9. Limitations
@@ -780,12 +827,12 @@ Primary generated outputs:
 - The polynomial libraries tried are low-degree; the second-order variants that add expressivity performed far worse on held-out reconstruction, so underfitting is not the binding constraint on the current data.
 - No configuration has demonstrated predictive validity on free-running reconstruction. The Section 6.5 result establishes short-horizon predictive structure only, and does not license claims about longer horizons.
 - The Section 6.5 skill figure comes from a delay-embedded ridge model, not from a sparse SINDy fit. Section 6.8 tests the fitted equations directly and finds they capture 0 percent (first-order) to 12 percent (second-order, acceleration) of the structure available in their own training targets. The short-horizon result therefore characterizes the data, not the pipeline's sparse artifacts, and must not be attributed to SINDy.
-- Skill over persistence measures prediction of increments. It is not a biomechanical validity measure, and 0.39 skill does not imply the fitted coefficients correspond to real biomechanical relationships.
+- Skill over persistence measures prediction of increments. It is not a biomechanical validity measure, and 0.38 skill does not imply the fitted coefficients correspond to real biomechanical relationships.
 - The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
-- The cross-joint coupling contribution in Section 6.9 averages 0.0075 uniform skill, about two percent of that model's total, and its sign reverses across held-out splits. It clears a circular-shift null on three of five splits. The hip-to-shoulder asymmetry is an observation about fitted coefficients, not evidence for the kinetic chain.
-- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body, and not that the proximal-to-distal kinetic chain has been recovered. The directional asymmetry that would evidence the latter is untested.
+- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
+- The chain ordering used in that test is a modelling judgement drawn from the biomechanics literature [1], not from the data. A different defensible ordering could change the result.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
@@ -793,7 +840,7 @@ Primary generated outputs:
 
 ## 10. Next Work
 
-1. Test the directional asymmetry, not just the presence of coupling. Section 6.9 establishes that cross-joint terms carry information, but coupling between hips and shoulders is expected of any mechanically linked body. What would evidence the proximal-to-distal kinetic chain is that hip-to-shoulder (+0.185) exceeds shoulder-to-hip (+0.092) beyond chance. Test the difference directly: fit with only the hip-to-shoulder direction permitted, then only the reverse, and compare skill under the same shift null. Until that is done no biomechanical reading is defensible.
+1. Report skill over persistence from `evaluate_baseball_sindy.py` directly, so the pipeline's own evaluation emits the metric the project now judges models by, rather than requiring a separate diagnostic script. The reconstruction metrics should stay alongside it for continuity.
 2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
 3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
 4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
