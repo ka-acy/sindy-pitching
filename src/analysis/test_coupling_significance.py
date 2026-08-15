@@ -63,6 +63,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-splits", type=int, default=20)
     p.add_argument("--test-fraction", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--drop-derived", default="hip_shoulder_separation_angle",
+                   help="Feature to remove from the DESIGN (not the targets). "
+                        "hip_shoulder_separation_angle is shoulder_rotation minus hip_rotation, "
+                        "and the identity holds near-exactly on some clip subsets, making those "
+                        "training draws rank-deficient. Removing it took divergence from 2/40 "
+                        "splits to 0/40 at a cost of 0.0009 skill. Pass an empty string to "
+                        "reproduce the unstabilized design.")
     p.add_argument("--output-dir", default="results/analysis/coupling_significance")
     return p.parse_args()
 
@@ -81,22 +88,29 @@ def load_all(feature_subdir: str, task_type: str) -> list[dict]:
     return clips
 
 
-def block(X: np.ndarray, depth: int, target_idx: list[int]) -> tuple[np.ndarray, np.ndarray]:
+def block(X: np.ndarray, depth: int, target_idx: list[int],
+          drop_idx: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Per-clip design and target. `drop_idx` removes one feature from the DESIGN only;
+    targets are read from X directly and are unaffected."""
+    n_feat = X.shape[1] - (1 if drop_idx is not None else 0)
     start = depth - 1
     if X.shape[0] < start + 2:
-        return np.zeros((0, X.shape[1] * depth)), np.zeros((0, len(target_idx)))
+        return np.zeros((0, n_feat * depth)), np.zeros((0, len(target_idx)))
     D, Y = [], []
     for t in range(start, X.shape[0] - 1):
         feats = [X[t]] + [X[t - k] - X[t - k - 1] for k in range(depth - 1)]
+        if drop_idx is not None:
+            feats = [np.delete(f, drop_idx) for f in feats]
         D.append(np.concatenate(feats))
         Y.append(X[t + 1, target_idx] - X[t, target_idx])
     return np.asarray(D), np.asarray(Y)
 
 
-def labels_for(names: list[str], depth: int) -> list[str]:
-    out = list(names)
+def labels_for(names: list[str], depth: int, drop: str | None = None) -> list[str]:
+    kept = [n for n in names if n != drop] if drop else list(names)
+    out = list(kept)
     for k in range(depth - 1):
-        out += [f"d{k+1}({nm})" for nm in names]
+        out += [f"d{k+1}({nm})" for nm in kept]
     return out
 
 
@@ -157,10 +171,13 @@ def main() -> None:
     names = clips[0]["names"]
     target_idx = [names.index(n) for n in CORE_POSITIONS if n in names]
     target_names = [names[i] for i in target_idx]
-    labels = labels_for(names, args.depth)
+    drop_name = args.drop_derived.strip() or None
+    drop_idx = names.index(drop_name) if drop_name in names else None
+    labels = labels_for(names, args.depth, drop_name)
     mask = self_mask(labels, target_names)
+    print(f"design: {'stabilized, dropped ' + drop_name if drop_idx is not None else 'baseline (unstabilized)'}")
 
-    blocks = [block(c["X"], args.depth, target_idx) for c in clips]
+    blocks = [block(c["X"], args.depth, target_idx, drop_idx) for c in clips]
     blocks = [b for b in blocks if b[0].shape[0] > 0]
     n = len(blocks)
     n_te = max(int(round(n * args.test_fraction)), 2)

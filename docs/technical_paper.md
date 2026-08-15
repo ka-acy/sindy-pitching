@@ -438,39 +438,50 @@ The hip-to-shoulder coefficient is roughly twice the shoulder-to-hip coefficient
 in the direction the proximal-to-distal kinetic chain would predict [1], and
 `stride_ankle_separation` picks up a `lead_knee_lift` term.
 
-**That asymmetry is not a finding, and the coupling gain does not survive testing.**
-`src/analysis/test_coupling_significance.py` subjects it to two tests
-(`results/analysis/coupling_significance/`). The statistic is the gain itself: uniform skill
-with all terms minus uniform skill with each equation restricted to its own variable's history.
+**The coupling gain is small but statistically detectable, and that is still not a
+biomechanical finding.** `src/analysis/test_coupling_significance.py` tests it two ways
+(`results/analysis/coupling_significance/summary.json`). The statistic is the gain itself:
+uniform skill with all terms minus uniform skill with each equation restricted to its own
+variable's history.
 
 The null circularly rolls, within each clip, every design column that is not part of the target
-variable, then refits and recomputes the gain. The roll has to be applied *per target*: any
-cross-joint column is some other target's self column, so a single shared mask leaves nearly all
-of them untouched. A circular roll also preserves each column's marginal distribution and
-autocorrelation, where a plain row shuffle would destroy the smoothness that makes these columns
-predictive at all and so give an unrealistically easy null.
+variable, then refits and recomputes the gain. The roll is applied *per target*: any cross-joint
+column is some other target's self column, so a single shared mask would leave nearly all of them
+untouched. A circular roll also preserves each column's marginal distribution and autocorrelation,
+where a plain row shuffle would destroy the smoothness that makes these columns predictive at all
+and so give an unrealistically easy null.
+
+These results use the stabilized 27-column design. On the original design the test was
+contaminated: cancelling coefficients of order 1e3 on the rank-deficient columns swamped the
+comparison, diverging splits had to be excluded by hand, and the gain reversed sign across
+splits. With the derived feature removed, **no splits are excluded** and the picture is
+consistent.
 
 | held-out split | observed gain | null mean | null sd | p |
 |---:|---:|---:|---:|---:|
-| 1 | -0.0016 | -0.0004 | 0.0008 | 0.934 |
-| 2 | +0.0010 | -0.0004 | 0.0014 | 0.016 |
-| 3 | -0.0059 | -0.0003 | 0.0008 | 1.000 |
-| 4 | +0.0120 | -0.0001 | 0.0002 | 0.016 |
-| 5 | +0.0138 | -0.0001 | 0.0004 | 0.016 |
+| 1 | +0.0081 | +0.0000 | 0.0001 | 0.010 |
+| 2 | +0.0159 | -0.0000 | 0.0002 | 0.010 |
+| 3 | -0.0011 | +0.0000 | 0.0001 | 1.000 |
+| 4 | +0.0024 | -0.0002 | 0.0003 | 0.010 |
+| 5 | +0.0071 | +0.0000 | 0.0002 | 0.010 |
 
-: Per-target circular-shift null, 60 draws on each of five independent held-out splits. The gain clears the null on three splits and is negative on two, so it is split-dependent rather than reliable.
+: Per-target circular-shift null, 100 draws on each of five independent held-out splits, stabilized design. The gain clears the null on four splits and is absent on the fifth.
 
-Across 20 random clip-level resplits the gain averages +0.0075 with a 95% confidence interval
-of [+0.0052, +0.0097]. But the null test shows its sign varies across held-out splits: it is
-negative on two of five, and clears the null on three of five. An effect that reverses sign
-depending on which clips are held out is not a basis for a biomechanical claim, and roughly
-0.008 of skill against the model's 0.388 total is about two percent either way.
+Across 30 random clip-level resplits, none excluded, the gain averages **+0.0071** with a 95%
+confidence interval of [+0.0055, +0.0087] and is positive on 29 of 30. Against null distributions
+with standard deviations of 0.0001 to 0.0003, the four positive splits sit many standard
+deviations above chance. The cross-joint terms therefore do carry information.
 
-The honest reading is that essentially all of this model's skill is each joint's own momentum,
-and the cross-joint terms contribute a small, unstable remainder. **The hip-to-shoulder
-asymmetry is therefore reported as an observation about the fitted coefficients, not as evidence
-for the kinetic chain.** Establishing it would need more clips and a stable effect across
-splits.
+**What that does and does not license.** The effect is about **1.8 percent** of the model's
+0.389 total skill, and one split in five shows none of it, so almost all of what this model does
+remains each joint's own momentum. More importantly, detecting that shoulder motion is predicted
+in part by hip motion is not a discovery: the hips and shoulders are mechanically linked through
+the trunk, and any whole-body coordination would produce it. The proximal-to-distal kinetic chain
+is a claim about *direction and precedence*, and what would evidence it is the **asymmetry** —
+hip-to-shoulder at +0.185 against shoulder-to-hip at +0.092. That asymmetry has not been tested.
+The null here asks whether cross-joint terms help at all, not whether one direction dominates the
+other beyond chance. Section 10 records that test as the precondition for any biomechanical
+reading, and until it is run the asymmetry remains an observation about fitted coefficients.
 
 **Instability, diagnosed and fixed.** The unrestricted 30-column fit diverged on 2 of 40 random
 clip-level splits, producing predictions of order 1e4 against true increments of order 1. On a
@@ -774,7 +785,7 @@ Primary generated outputs:
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
 - The cross-joint coupling contribution in Section 6.9 averages 0.0075 uniform skill, about two percent of that model's total, and its sign reverses across held-out splits. It clears a circular-shift null on three of five splits. The hip-to-shoulder asymmetry is an observation about fitted coefficients, not evidence for the kinetic chain.
-- The delay model's divergence on some splits is fixed by dropping the derived `hip_shoulder_separation_angle` from the design (Section 6.9), but the coupling analysis was run before that fix and excluded diverging splits by hand. Its conclusion is unaffected in direction, though the numbers would be cleaner on the stabilized design.
+- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body, and not that the proximal-to-distal kinetic chain has been recovered. The directional asymmetry that would evidence the latter is untested.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
@@ -782,7 +793,7 @@ Primary generated outputs:
 
 ## 10. Next Work
 
-1. Repeat the coupling test of Section 6.9 on the stabilized 27-column design. The instability that forced diverging splits to be excluded by hand is now fixed, so the resplit confidence interval and the shift null can both be computed without exclusions. The expected conclusion is unchanged, but the numbers would no longer carry a hand-applied filter.
+1. Test the directional asymmetry, not just the presence of coupling. Section 6.9 establishes that cross-joint terms carry information, but coupling between hips and shoulders is expected of any mechanically linked body. What would evidence the proximal-to-distal kinetic chain is that hip-to-shoulder (+0.185) exceeds shoulder-to-hip (+0.092) beyond chance. Test the difference directly: fit with only the hip-to-shoulder direction permitted, then only the reverse, and compare skill under the same shift null. Until that is done no biomechanical reading is defensible.
 2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
 3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
 4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
