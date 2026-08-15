@@ -128,6 +128,7 @@ end
 """
 
 PREAMBLE_COMMON = r"""
+\usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{booktabs}
 \usepackage{array}
@@ -321,6 +322,15 @@ def preprocess(text: str, style: str) -> tuple[str, str]:
         out = out.replace(src, dst)
         abstract = abstract.replace(src, dst)
 
+    # Placeholder tokens from editing scripts have reached the rendered PDF before now.
+
+    for token in ("{D}", "TODO", "FIXME", "XXX"):
+
+        if token in out or token in abstract:
+
+            raise SystemExit(f"placeholder {token!r} left in the source; fix before building")
+
+
     leftover = sorted({c for c in out + abstract if ord(c) > 126 and c != "—"})
     if leftover:
         raise SystemExit(
@@ -355,6 +365,17 @@ def main() -> None:
         tmp_path = Path(tmp)
         (tmp_path / "breaktt.lua").write_text(BREAK_TT_LUA)
         (tmp_path / "tablewidths.lua").write_text(TABLE_WIDTHS_LUA)
+        # Figures live under results/, which is gitignored: they are build artifacts, not
+        # sources. Fail loudly rather than silently emitting a paper with missing figures.
+        figs = PROJECT_ROOT / "results" / "figures"
+        wanted = set(re.findall(r"results/figures/([\w.-]+)", SOURCE.read_text()))
+        if wanted:
+            missing = sorted(w for w in wanted if not (figs / w).exists())
+            if missing:
+                raise SystemExit(
+                    "the paper references figures that do not exist: " + ", ".join(missing)
+                    + "\nrun: python src/analysis/make_paper_figures.py")
+            shutil.copytree(figs, tmp_path / "results" / "figures")
         (tmp_path / "preamble.tex").write_text(
             PREAMBLE_IEEE if args.style == "ieee" else PREAMBLE_ARTICLE
         )
@@ -410,6 +431,12 @@ def main() -> None:
         tex = (tmp_path / "paper.tex").read_text()
         if args.style == "ieee":
             tex = longtable_to_float(tex)
+            # The horizon figure is a two-panel comparison and needs the full text width;
+            # single-column figures stay in `figure`.
+            tex = re.sub(
+                r"\\begin\{figure\}(?P<b>((?!\\end\{figure\}).)*fig2_horizon((?!\\end\{figure\}).)*)\\end\{figure\}",
+                lambda m: "\\begin{figure*}[!t]" + m.group("b") + "\\end{figure*}",
+                tex, flags=re.S)
             # IEEEtran wants Index Terms right after the abstract.
             tex = tex.replace(
                 "\\end{abstract}",

@@ -299,6 +299,9 @@ The H=240 row is the only sign of the crossover one would expect as persistence 
 
 A separate verification confirms the rollout failure is genuine rather than an implementation artifact. Teacher-forcing the same model, so true history is supplied at each step and no error compounds, scores +0.7569 core R2 against persistence's +0.8453 (`results/evaluation/baseball/forecast_baselines/summary.csv`). The map is sound; free-running divergence is real error compounding. Note that this teacher-forced score is itself below persistence, so it is not an additional positive result — it is only evidence that `rollout_delay` is correct.
 
+
+![Core-position reconstruction R2 by rollout horizon. The left panel shows the full range; the right panel zooms to the comparison that matters. The frozen control outscores both fitted models at every horizon.](results/figures/fig2_horizon.pdf){width=100%}
+
 For completeness, the free-running comparison against all controls under a common seed and scoring window:
 
 | method | core R2 | reading |
@@ -402,15 +405,17 @@ assumed (`src/analysis/fit_delay_sindy.py`, `results/analysis/delay_sindy/`).
 
 : Sparse skill over persistence by history depth. Almost all of the gain arrives with the first frame of history, and the curve saturates by depth 3.
 
+![Skill over persistence against history depth. The dense-ridge band and the sparse fit coincide: 32 terms match 240 coefficients. Almost the entire gain arrives with the first frame of history.](results/figures/fig1_skill_by_depth.pdf){width=100%}
+
 **Sparse identification retains essentially all of the available skill.** At depth 3 a
 30-term sparse model scores +0.3881 uniform against dense ridge's +0.3877 with 240
-coefficients {D} the sparse fit is not worse, and it is an order of magnitude smaller. This is
+coefficients — the sparse fit is not worse, and it is an order of magnitude smaller. This is
 the first result in this project that belongs to the pipeline's own method rather than to a
 baseline.
 
 **It also beats the unfitted momentum control, which is the bar that matters here.** Every
 discovered equation is dominated by the target's own previous increment, so the relevant
-control is not persistence but momentum {D} a joint continuing to move as it was moving,
+control is not persistence but momentum — a joint continuing to move as it was moving,
 which requires no fitting at all:
 
 | model | terms | skill (pooled) | skill (uniform) |
@@ -422,6 +427,8 @@ which requires no fitting at all:
 | sparse STLSQ, all terms | 30 | **+0.2817** | **+0.3881** |
 
 : Fitted sparse models against unfitted momentum controls, depth 3, threshold 0.05. The fit adds 0.257 uniform skill over the strongest unfitted control, so the result is not merely momentum.
+
+![Observed against predicted one-step increments for one held-out clip, shoulder rotation. Plotted on the increment rather than the state because persistence alone scores 0.968 on the state, so state-space curves overlay and show nothing.](results/figures/fig3_increments.pdf){width=100%}
 
 The fitted model clears the momentum control by 0.257 uniform, and both aggregations agree in
 sign for the first time in this project's forecasting results. Constant-acceleration
@@ -772,6 +779,13 @@ Reproduce the Section 6.9 coupling test (five held-out splits, 60 null draws eac
 
 ```bash
 ./.venv/bin/python src/analysis/test_coupling_significance.py --n-null 60 --null-splits 5
+```
+
+Regenerate the figures. They are build artifacts under `results/`, which is excluded from
+version control, so this must run before the paper is built:
+
+```bash
+./.venv/bin/python src/analysis/make_paper_figures.py
 ```
 
 Reproduce the Section 6.9 stability comparison:
