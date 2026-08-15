@@ -135,6 +135,8 @@ skill = 1 - SSE(model) / SSE(zero-increment)
 
 where the target is `delta(t) = x(t+1) - x(t)`. This is the standard mean-square-error skill score, in which accuracy is expressed relative to a trivial reference forecast rather than in absolute terms [14]; persistence is the reference here, and the climatological analogue — the window mean — is what the reconstruction R2 above uses. Skill is 0 for persistence by construction, and positive skill means predictive structure beyond "nothing changes."
 
+`evaluate_baseball_sindy.py` computes this on every run, as `persistence_skill_pooled` and `persistence_skill_uniform` per clip and `mean_persistence_skill_*` in the summary, so the metric the project judges models by is emitted by the pipeline itself rather than by a separate diagnostic. The reconstruction metrics remain alongside it.
+
 **Aggregation is reported two ways, and disagreement is treated as a null result.** Core positions span roughly a 13x range in per-frame signal scale (`lead_knee_lift` 0.012 versus `dominant_elbow_flexion_angle` 0.158, about 160x in variance), so pooled sum-of-squares is decided almost entirely by the largest-amplitude columns while uniform per-column averaging weights all eight equally. Every skill number in Section 6 is reported under both. Where the two disagree in sign, this paper reports no win rather than selecting the favorable aggregation. `core_position_metrics` uses uniform averaging, so uniform is the figure comparable to the rest of the project.
 
 ## 6. Current Results
@@ -157,13 +159,15 @@ Training summary (`results/equations/baseball/train/summary.csv`, snapshot `trai
 
 : Training summary for the operative first-order configuration, 111 training clips.
 
-Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`):
+Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`). The skill rows make the operative model's position explicit: it has no short-horizon predictive structure beyond persistence, which is what Section 6.8 attributes to the state rather than the estimator, and Section 6.9 recovers by adding history.
 
 | quantity | value |
 |---|---|
 | held-out clips | 29 |
 | mean derivative R2 | −0.0184 |
 | mean derivative RMSE | 9.8448 |
+| skill over persistence, pooled | +0.0014 |
+| skill over persistence, uniform | −0.0041 |
 | stable simulation fraction | 1.0 |
 | whole-state reconstruction R2 | −2.7981 |
 | whole-state reconstruction RMSE | 0.7232 |

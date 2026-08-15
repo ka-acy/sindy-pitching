@@ -66,6 +66,38 @@ def core_position_metrics(
     return r2, nrmse
 
 
+def persistence_skill(
+    X: np.ndarray, pred_derivative: np.ndarray, dt: float, feature_names: list[str]
+) -> tuple[float, float]:
+    """Skill over persistence on one-step increments, over the core position columns.
+
+    Reconstruction R2 is measured against the window mean, which at ~60 fps is a weak
+    reference: the joints barely move over a short rollout, so a model that predicts no
+    change at all already scores well. The reference that discriminates is persistence --
+    predicting zero increment -- and the model's one-step increment prediction is
+    dt * f(x(t)):
+
+        skill = 1 - SSE(model) / SSE(zero increment)
+
+    Zero for persistence by construction; positive means predictive structure beyond
+    "nothing changes". Returned as (pooled, uniform): pooled sums squares across columns
+    and so is dominated by the large-amplitude ones, uniform averages per-column skill.
+    Both are reported because they have disagreed in sign elsewhere in this project.
+    """
+    idx = [feature_names.index(n) for n in CORE_POSITIONS if n in feature_names]
+    if not idx or X.shape[0] < 2:
+        return float("nan"), float("nan")
+    true_inc = (X[1:] - X[:-1])[:, idx]
+    pred_inc = (dt * pred_derivative[:-1])[:, idx]
+    pooled_den = float(np.sum(true_inc**2))
+    pooled = 1.0 - float(np.sum((true_inc - pred_inc) ** 2)) / pooled_den if pooled_den > 0 else float("nan")
+    num = np.sum((true_inc - pred_inc) ** 2, axis=0)
+    den = np.sum(true_inc**2, axis=0)
+    keep = den > 0
+    uniform = float(np.mean(1.0 - num[keep] / den[keep])) if keep.any() else float("nan")
+    return pooled, uniform
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -258,6 +290,8 @@ def main() -> None:
             core_nrmses: list[float] = []
             horizon_core_r2s: dict[int, list[float]] = {h: [] for h in recon_horizons}
             stable_flags: list[float] = []
+            skill_pooleds: list[float] = []
+            skill_uniforms: list[float] = []
             plotted = 0
 
             for row, X, X_dot, feature_names, metadata in items:
@@ -266,6 +300,11 @@ def main() -> None:
                 pred = model.predict(X_scaled)
                 pred = inverse_transform_derivative(pred, scaler) if scaler is not None else pred
                 deriv_r2, deriv_rmse = derivative_metrics(X_dot, pred)
+                skill_pooled, skill_uniform = persistence_skill(X, pred, dt, feature_names)
+                if np.isfinite(skill_pooled):
+                    skill_pooleds.append(skill_pooled)
+                if np.isfinite(skill_uniform):
+                    skill_uniforms.append(skill_uniform)
 
                 sim, error, recon_frames = reconstruct_trial(
                     model, X, dt, int(eval_cfg["reconstruction_frames"]), scaler, integrator=integrator
@@ -322,6 +361,8 @@ def main() -> None:
                         "reconstruction_frames": recon_frames,
                         "derivative_r2": deriv_r2,
                         "derivative_rmse": deriv_rmse,
+                        "persistence_skill_pooled": skill_pooled,
+                        "persistence_skill_uniform": skill_uniform,
                         "reconstruction_r2": recon_r2,
                         "reconstruction_rmse": recon_rmse,
                         "core_position_recon_r2": core_position_recon_r2,
@@ -339,6 +380,8 @@ def main() -> None:
                     "num_clips": len(items),
                     "mean_derivative_r2": float(np.mean(deriv_r2s)) if deriv_r2s else "",
                     "mean_derivative_rmse": float(np.mean(deriv_rmses)) if deriv_rmses else "",
+                    "mean_persistence_skill_pooled": float(np.mean(skill_pooleds)) if skill_pooleds else "",
+                    "mean_persistence_skill_uniform": float(np.mean(skill_uniforms)) if skill_uniforms else "",
                     "stable_simulation_fraction": float(np.mean(stable_flags)) if stable_flags else "",
                     "mean_reconstruction_r2": float(np.mean(recon_r2s)) if recon_r2s else "",
                     "mean_reconstruction_rmse": float(np.mean(recon_rmses)) if recon_rmses else "",
@@ -363,6 +406,8 @@ def main() -> None:
             "reconstruction_frames",
             "derivative_r2",
             "derivative_rmse",
+            "persistence_skill_pooled",
+            "persistence_skill_uniform",
             "reconstruction_r2",
             "reconstruction_rmse",
             "core_position_recon_r2",
@@ -381,6 +426,8 @@ def main() -> None:
             "num_clips",
             "mean_derivative_r2",
             "mean_derivative_rmse",
+            "mean_persistence_skill_pooled",
+            "mean_persistence_skill_uniform",
             "stable_simulation_fraction",
             "mean_reconstruction_r2",
             "mean_reconstruction_rmse",
