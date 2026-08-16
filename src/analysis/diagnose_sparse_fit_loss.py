@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-split", default="train")
     p.add_argument("--eval-split", default="test")
     p.add_argument("--task-type", default="pitching")
+    p.add_argument("--n-splits", type=int, default=20,
+                   help="Random clip-level resplits. The operative train/test split is one "
+                        "draw; the claim that sparsification costs nothing should not rest on "
+                        "which 29 clips happened to be held out.")
+    p.add_argument("--test-fraction", type=float, default=0.2)
+    p.add_argument("--seed", type=int, default=7)
     p.add_argument("--output-csv", default="results/analysis/sparse_fit_loss.csv")
     return p.parse_args()
 
@@ -118,52 +124,79 @@ def main() -> None:
     from sklearn.linear_model import RidgeCV
     from sklearn.preprocessing import StandardScaler
     import pysindy as ps
+    rng = np.random.default_rng(args.seed)
 
     rows = []
     for state, spec in STATES.items():
-        tr = load(spec["subdir"], args.train_split, args.task_type)
-        te = load(spec["subdir"], args.eval_split, args.task_type)
-        idx = target_indices(tr[0]["names"], spec["target"])
-        D_tr, Y_tr = stack(tr, idx)
-        D_te, Y_te = stack(te, idx)
-
-        scaler = StandardScaler().fit(D_tr)
-        Ztr, Zte = scaler.transform(D_tr), scaler.transform(D_te)
-        # Standardize targets too, so a single STLSQ threshold is comparable across the
-        # very different column scales; predictions are mapped back before scoring.
-        ymu, ysd = Y_tr.mean(axis=0), Y_tr.std(axis=0)
-        ysd[ysd < 1e-12] = 1.0
-        Ytr_s = (Y_tr - ymu) / ysd
+        # Pool both splits and resample, so every estimator sees the same draws and the
+        # comparison carries an interval rather than resting on one held-out set.
+        clips = load(spec["subdir"], args.train_split, args.task_type) \
+            + load(spec["subdir"], args.eval_split, args.task_type)
+        idx = target_indices(clips[0]["names"], spec["target"])
+        blocks = [stack([c], idx) for c in clips]
+        blocks = [b for b in blocks if b[0].shape[0] > 0]
+        n = len(blocks)
+        n_te = max(int(round(n * args.test_fraction)), 2)
+        splits = [rng.permutation(n) for _ in range(args.n_splits)]
 
         print(f"\n=== {state}: {spec['note']} ===")
-        print(f"  train rows {D_tr.shape[0]}, design dims {D_tr.shape[1]}, "
-              f"target cols {len(idx)}, test rows {D_te.shape[0]}")
-        print(f"  {'estimator':22s} {'nonzero':>8s} {'skill(pool)':>12s} {'skill(unif)':>12s}")
+        print(f"  {n} clips, {args.n_splits} resplits, {len(idx)} target columns")
+        print(f"  {'estimator':24s} {'nonzero':>8s} {'skill(unif)':>12s} {'95% CI':>20s}")
 
-        rows.append({"state": state, "estimator": "persistence (no model)", "nonzero_coefs": 0,
-                     "skill_pooled": 0.0, "skill_uniform": 0.0})
-        print(f"  {'persistence':22s} {0:>8d} {0.0:>12.4f} {0.0:>12.4f}")
+        def run(fit_fn):
+            vals, nz = [], []
+            for perm in splits:
+                te, tr = perm[:n_te], perm[n_te:]
+                D_tr = np.vstack([blocks[i][0] for i in tr])
+                Y_tr = np.vstack([blocks[i][1] for i in tr])
+                D_te = np.vstack([blocks[i][0] for i in te])
+                Y_te = np.vstack([blocks[i][1] for i in te])
+                scaler = StandardScaler().fit(D_tr)
+                Ztr, Zte = scaler.transform(D_tr), scaler.transform(D_te)
+                ymu, ysd = Y_tr.mean(axis=0), Y_tr.std(axis=0)
+                ysd[ysd < 1e-12] = 1.0
+                pred, k = fit_fn(Ztr, (Y_tr - ymu) / ysd, Zte)
+                pred = pred * ysd + ymu
+                _, u = skill(Y_te, pred)
+                if np.isfinite(u) and abs(u) < 10:
+                    vals.append(u)
+                    nz.append(k)
+            a = np.asarray(vals)
+            se = a.std(ddof=1) / np.sqrt(a.size) if a.size > 1 else float("nan")
+            return a, (a.mean() - 1.96 * se, a.mean() + 1.96 * se), float(np.mean(nz))
 
-        ridge = RidgeCV(alphas=RIDGE_ALPHAS).fit(Ztr, Ytr_s)
-        pred = np.asarray(ridge.predict(Zte)) * ysd + ymu
-        sp, su = skill(Y_te, pred)
-        nz = int(np.sum(np.abs(np.asarray(ridge.coef_)) > 1e-10))
+        def ridge_fit(Ztr, Ytr_s, Zte):
+            m = RidgeCV(alphas=RIDGE_ALPHAS).fit(Ztr, Ytr_s)
+            return np.asarray(m.predict(Zte)), int(np.sum(np.abs(np.asarray(m.coef_)) > 1e-10))
+
+        def stlsq_fit(thr):
+            def f(Ztr, Ytr_s, Zte):
+                coefs = np.zeros((Ytr_s.shape[1], Ztr.shape[1]))
+                for j in range(Ytr_s.shape[1]):
+                    o = ps.STLSQ(threshold=thr, alpha=0.001, max_iter=20)
+                    o.fit(Ztr, Ytr_s[:, j])
+                    coefs[j] = np.asarray(o.coef_).ravel()
+                return Zte @ coefs.T, int(np.sum(np.abs(coefs) > 1e-10))
+            return f
+
+        rows.append({"state": state, "estimator": "persistence (no model)", "n_splits": 0,
+                     "nonzero_coefs": 0, "skill_uniform": 0.0, "ci_low": 0.0, "ci_high": 0.0})
+        print(f"  {'persistence':24s} {0:>8d} {0.0:>12.4f} {'':>20s}")
+
+        a, ci, k = run(ridge_fit)
         rows.append({"state": state, "estimator": "RidgeCV (dense upper bound)",
-                     "nonzero_coefs": nz, "skill_pooled": sp, "skill_uniform": su})
-        print(f"  {'RidgeCV (dense)':22s} {nz:>8d} {sp:>12.4f} {su:>12.4f}")
+                     "n_splits": a.size, "nonzero_coefs": k,
+                     "skill_uniform": float(a.mean()), "ci_low": ci[0], "ci_high": ci[1]})
+        print(f"  {'RidgeCV (dense)':24s} {k:>8.0f} {a.mean():>12.4f} "
+              f"[{ci[0]:+.4f},{ci[1]:+.4f}]")
 
         for thr in THRESHOLDS:
-            opt = ps.STLSQ(threshold=thr, alpha=0.001, max_iter=20)
-            coefs = np.zeros((Ytr_s.shape[1], Ztr.shape[1]))
-            for j in range(Ytr_s.shape[1]):
-                opt.fit(Ztr, Ytr_s[:, j])
-                coefs[j] = np.asarray(opt.coef_).ravel()
-            pred = (Zte @ coefs.T) * ysd + ymu
-            sp, su = skill(Y_te, pred)
-            nz = int(np.sum(np.abs(coefs) > 1e-10))
+            a, ci, k = run(stlsq_fit(thr))
             rows.append({"state": state, "estimator": f"STLSQ threshold={thr}",
-                         "nonzero_coefs": nz, "skill_pooled": sp, "skill_uniform": su})
-            print(f"  {'STLSQ thr=' + str(thr):22s} {nz:>8d} {sp:>12.4f} {su:>12.4f}")
+                         "n_splits": a.size, "nonzero_coefs": k,
+                         "skill_uniform": float(a.mean()), "ci_low": ci[0], "ci_high": ci[1]})
+            print(f"  {'STLSQ thr=' + str(thr):24s} {k:>8.0f} {a.mean():>12.4f} "
+                  f"[{ci[0]:+.4f},{ci[1]:+.4f}]")
 
     out = PROJECT_ROOT / args.output_csv
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -174,21 +207,16 @@ def main() -> None:
 
     print("\n--- verdict ---")
     for state in STATES:
-        sub = [r for r in rows if r["state"] == state]
+        sub = [r for r in rows if r["state"] == state and r["n_splits"]]
         ridge = next(r for r in sub if r["estimator"].startswith("RidgeCV"))
-        best_st = max((r for r in sub if r["estimator"].startswith("STLSQ")),
-                      key=lambda r: r["skill_uniform"])
-        gap = ridge["skill_uniform"] - best_st["skill_uniform"]
-        if ridge["skill_uniform"] <= 0.02:
-            msg = ("neither estimator extracts skill -> NOT a sparse-fit defect; "
-                   "the state does not determine the target")
-        elif gap > 0.05:
-            msg = f"ridge beats best STLSQ by {gap:.3f} -> sparsification IS losing skill"
-        else:
-            msg = (f"ridge and best STLSQ within {gap:.3f} -> sparsification is not the "
-                   "binding loss")
-        print(f"  {state}: ridge={ridge['skill_uniform']:+.4f}, "
-              f"best STLSQ={best_st['skill_uniform']:+.4f} ({best_st['estimator']}) -> {msg}")
+        best = max((r for r in sub if r["estimator"].startswith("STLSQ")),
+                   key=lambda r: r["skill_uniform"])
+        gap = ridge["skill_uniform"] - best["skill_uniform"]
+        overlap = not (ridge["ci_low"] > best["ci_high"] or best["ci_low"] > ridge["ci_high"])
+        print(f"  {state}: ridge {ridge['skill_uniform']:+.4f} "
+              f"[{ridge['ci_low']:+.4f},{ridge['ci_high']:+.4f}] vs best STLSQ "
+              f"{best['skill_uniform']:+.4f} [{best['ci_low']:+.4f},{best['ci_high']:+.4f}]")
+        print(f"    gap {gap:+.4f}; intervals {'OVERLAP -> sparsification costs nothing detectable' if overlap else 'are disjoint -> sparsification has a real cost'}")
     print(f"\noutput: {out.relative_to(PROJECT_ROOT).as_posix()}")
 
 

@@ -191,6 +191,27 @@ Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`). The 
 
 : Held-out comparison of every fitted configuration against the frozen zero-dynamics control. Core R2 degrades monotonically as term count rises.
 
+Those are single-split figures. Because every configuration was scored on the same 29 held-out
+clips, the comparison against the control is naturally **paired**, and a paired statistic is
+far tighter than resampling two means independently. Bootstrapping the per-clip difference over
+clips — not over frames, since frames within a clip are strongly dependent and would understate
+the uncertainty — gives (`src/analysis/paired_control_intervals.py`):
+
+| model | mean difference from control | 95% CI | clips beating control |
+|---|---:|---|---:|
+| first-order, plain (operative) | −23.98 | [−48.21, −4.22] | 11/29 |
+| first-order, weak-form, multi-seed | −2.32 | [−4.98, −0.27] | 15/29 |
+
+: Paired bootstrap over clips, 10,000 resamples. Both intervals exclude zero, so both models are worse than the frozen control by more than sampling noise.
+
+Both intervals exclude zero, so the headline claim survives: these models are worse than doing
+nothing, not merely indistinguishable from it.
+
+One nuance the means hide. Weak-form actually beats the control on **15 of 29 clips**, a bare
+majority, yet its average is worse — its losses are far larger than its wins. The aggregate
+conclusion is therefore driven by tail behaviour on a minority of clips rather than by uniform
+inferiority, which is worth knowing for anyone tempted to read the mean as "always worse".
+
 Short-horizon core R2, plain vs weak-form vs control:
 
 | horizon (frames) | plain first-order | weak-form | frozen control |
@@ -363,22 +384,22 @@ On the non-trivial task for that state — predicting rate increments, i.e. acce
 
 The achievable bound is what a dense, minimally regularized linear model of the same state extracts. `src/analysis/diagnose_sparse_fit_loss.py` measures it by holding the design matrix and the target fixed and varying only the estimator (`results/analysis/sparse_fit_loss.csv`):
 
-| state | target | RidgeCV (dense) | best STLSQ | STLSQ at operative threshold 0.2 |
-|---|---|---:|---:|---:|
-| first-order | position increment from position alone | **+0.0131** | +0.0128 | +0.0005 |
-| second-order | rate increment from position and velocity | **+0.1347** | +0.1345 | +0.1250 |
+| state | target | RidgeCV (dense) | best STLSQ | STLSQ at operative 0.2 |
+|---|---|---|---|---:|
+| first-order | position increment from position alone | **+0.0099** [+0.0086, +0.0112] | +0.0097 [+0.0083, +0.0111] | +0.0001 |
+| second-order | rate increment from position and velocity | **+0.1311** [+0.1181, +0.1440] | +0.1310 [+0.1181, +0.1440] | +0.1246 |
 
-: Achievable skill by estimator, design matrix and target held fixed. Dense ridge and the best sparse fit agree to within 0.0003, so sparsification is not where the skill is lost.
+: Achievable skill by estimator over 20 random clip-level resplits, design matrix and target held fixed, with 95% confidence intervals. The dense and sparse intervals overlap almost completely on both states, so sparsification costs nothing detectable.
 
-**Sparsification is not the binding loss.** Dense ridge and the best STLSQ agree to within 0.0003 on both states. There is a real but small threshold cost — at the operative threshold 0.2 the first-order fit is zeroed entirely (+0.0005 against +0.0128 at threshold 0.01), which is why the fitted first-order model scored zero — but the amount at stake is 0.013, not 0.69.
+**Sparsification is not the binding loss.** Dense ridge and the best STLSQ differ by 0.0002 on the first-order state and 0.0000 on the second-order state, and their confidence intervals overlap almost completely. There is a real but small threshold cost — at the operative threshold 0.2 the first-order fit is zeroed entirely (+0.0005 against +0.0128 at threshold 0.01), which is why the fitted first-order model scored zero — but the amount at stake is 0.013, not 0.69.
 
-**The binding constraint is the state's information content.** For the first-order state a dense linear model of position alone reaches only +0.0131: position does not determine the next increment, so there was almost nothing for the sparse fit to lose. This agrees with Section 6.4, where plain ridge on `[1, x]` scored —0.0004 on the derivative.
+**The binding constraint is the state's information content.** For the first-order state a dense linear model of position alone reaches only +0.0099 [+0.0086, +0.0112]: position does not determine the next increment, so there was almost nothing for the sparse fit to lose. This agrees with Section 6.4, where plain ridge on `[1, x]` scored —0.0004 on the derivative.
 
 What does predict the increment is recent history. On the identical target and the identical 29 test clips:
 
 | state given to the model | uniform skill over persistence |
 |---|---:|
-| position only, `[1, x(t)]` | +0.0131 |
+| position only, `[1, x(t)]` | +0.0099 |
 | position plus two frames of history | **+0.3874** |
 
 : The same target and the same clips, differing only in whether the model is given recent history. An autonomous first-order SINDy model has no mechanism to use it.
@@ -788,6 +809,14 @@ version control, so this must run before the paper is built:
 ./.venv/bin/python src/analysis/make_paper_figures.py
 ```
 
+Reproduce the Section 6.2 paired control intervals (requires the per-clip control scores, which
+`evaluate_static_baseline.py` writes alongside its summary):
+
+```bash
+./.venv/bin/python src/preprocessing/evaluate_static_baseline.py
+./.venv/bin/python src/analysis/paired_control_intervals.py
+```
+
 Reproduce the Section 6.9 stability comparison:
 
 ```bash
@@ -834,6 +863,8 @@ Primary generated outputs:
 - `results/analysis/coupling_significance/summary.json`
 - `results/analysis/delay_sindy/stability.csv`
 - `results/analysis/kinetic_chain_asymmetry/summary.json`
+- `results/analysis/paired_control_intervals.csv`
+- `results/evaluation/baseball/static_baseline/per_clip.csv`
 - `results/analysis/representation_study/comparison.csv`
 
 ## 9. Limitations
@@ -853,7 +884,7 @@ Primary generated outputs:
 - The chain ordering used in that test is a modelling judgement drawn from the biomechanics literature [1], not from the data. A different defensible ordering could change the result.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
-- Results come from one train/test split with no confidence intervals, so the reported differences between configurations are not accompanied by uncertainty estimates.
+- Sections 6.1 and 6.3 report the operative pipeline's single train/test split, since that is what the pipeline produces. Sections 6.2, 6.8 and 6.9 now carry intervals — paired bootstrap over clips for the control comparison, resplits elsewhere — but the ensemble and second-order rows of Section 6.2 have not been re-scored with intervals, because that would mean refitting those configurations on every resample.
 - The system identifies sparse equations from measured features; it does not prove causal biomechanical mechanisms.
 
 ## 10. Next Work
@@ -878,7 +909,7 @@ This work contributes a reproducible software framework for sparse dynamical mod
 
 The methodological contribution is the control-paired evaluation protocol: a state-comparable core-position reconstruction metric, a frozen-model control and a persistence control that make it interpretable, dual aggregation with sign disagreement treated as a null, and the discipline of matching each control to the specific task being scored. This protocol changed four conclusions in this project — three apparent positive results proved to be artifacts, and one real result had been invisible under the metric previously used (Sections 6.3, 6.4, 6.5, 6.6). That track record is the strongest argument for the protocol.
 
-The empirical contribution is a characterized boundary rather than a flat negative, with the failure localized. Across first-order, second-order, ensemble, and weak-form configurations on 140 single-view broadcast-derived pitching clips, no fitted sparse model survives free-running reconstruction, and all are outperformed by a zero-dynamics baseline. Yet the same data supports short-horizon prediction: 0.39 skill over persistence on held-out increments, backed by increment autocorrelation of 0.35 to 0.88 and signal-to-noise of 2.2 to 4.4. Candidate explanations were tested and excluded one at a time — phase (no gain in three forms), clip heterogeneity (the per-clip oracle scores below a cross-clip delay model), the pose noise floor (SNR 2.2 to 4.4), and the sparse estimator (dense ridge and the best STLSQ agree to within 0.0003, Section 6.8). What remains is the state representation: an autonomous first-order state of joint positions does not determine its own next increment, and supplying two frames of history raises skill on the identical target from +0.0131 to +0.3874. That is a specific, testable diagnosis that points at a concrete change rather than at more tuning.
+The empirical contribution is a characterized boundary rather than a flat negative, with the failure localized. Across first-order, second-order, ensemble, and weak-form configurations on 140 single-view broadcast-derived pitching clips, no fitted sparse model survives free-running reconstruction, and all are outperformed by a zero-dynamics baseline. Yet the same data supports short-horizon prediction: 0.39 skill over persistence on held-out increments, backed by increment autocorrelation of 0.35 to 0.88 and signal-to-noise of 2.2 to 4.4. Candidate explanations were tested and excluded one at a time — phase (no gain in three forms), clip heterogeneity (the per-clip oracle scores below a cross-clip delay model), the pose noise floor (SNR 2.2 to 4.4), and the sparse estimator (dense ridge and the best STLSQ agree to within 0.0003, Section 6.8). What remains is the state representation: an autonomous first-order state of joint positions does not determine its own next increment, and supplying two frames of history raises skill on the identical target from +0.0099 to +0.3874. That is a specific, testable diagnosis that points at a concrete change rather than at more tuning.
 
 The practical value of the boundary is that it says what to build next, and what not to. Short-horizon prediction is a task this data supports and is where a defensible biomechanical claim would have to start, but the sparse-fitting stage must be repaired before the pipeline can make that claim on its own artifacts. Free-running reconstruction of broadcast-derived pitching pose is not achievable with these methods and should not be the target. Better pose, larger pools, richer libraries, and per-pitcher conditioning are all secondary to the sparse fit, since none of them is where the measured loss occurs.
 

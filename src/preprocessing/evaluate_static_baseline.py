@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         default="results/evaluation/baseball/static_baseline/summary.csv",
         help="Summary CSV path relative to the project root.",
     )
+    parser.add_argument(
+        "--per-clip-csv",
+        default="results/evaluation/baseball/static_baseline/per_clip.csv",
+        help="Per-clip scores. Needed to compare the control against a fitted model on the "
+             "SAME clips, which is a paired comparison and far tighter than comparing summaries.",
+    )
     return parser.parse_args()
 
 
@@ -95,6 +101,7 @@ def main() -> None:
         task_rows = [row for row in manifest_rows if row["task_type"] == task_type]
         core_r2s: list[float] = []
         core_nrmses: list[float] = []
+        per_clip: list[dict[str, Any]] = []
         horizon_r2s: dict[int, list[float]] = {h: [] for h in horizons}
 
         for row in task_rows:
@@ -110,6 +117,9 @@ def main() -> None:
             core_r2, core_nrmse = core_position_metrics(X_recon, sim, feature_names)
             core_r2s.append(core_r2)
             core_nrmses.append(core_nrmse)
+            per_clip.append({"task_type": task_type, "clip_id": row["clip_id"],
+                             "core_position_recon_r2": core_r2,
+                             "core_position_recon_nrmse": core_nrmse})
             for h in horizons:
                 if frame_count >= h:
                     h_r2, _ = core_position_metrics(X_recon[:h], sim[:h], feature_names)
@@ -137,6 +147,10 @@ def main() -> None:
 
     output_path = PROJECT_ROOT / args.output_csv
     write_csv(output_path, fieldnames, summary_rows)
+    if per_clip:
+        write_csv(PROJECT_ROOT / args.per_clip_csv,
+                  ["task_type", "clip_id", "core_position_recon_r2", "core_position_recon_nrmse"],
+                  per_clip)
     print(json.dumps(summary_rows, indent=2))
     print(f"output: {output_path.relative_to(PROJECT_ROOT).as_posix()}")
 
