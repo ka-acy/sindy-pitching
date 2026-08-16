@@ -151,7 +151,9 @@ def candidate_configs(model_cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return configs
 
 
-def selection_is_degenerate(results: list[dict[str, Any]], min_accuracy: float) -> bool:
+def selection_is_degenerate(
+    results: list[dict[str, Any]], min_accuracy: float, metric_key: str = "mean_trial_r2"
+) -> bool:
     """True when no candidate reaches a usable accuracy, so the choice is not meaningful.
 
     `sparsity_weighted_r2` maximizes accuracy minus a term-count penalty. That is sound while
@@ -164,8 +166,9 @@ def selection_is_degenerate(results: list[dict[str, Any]], min_accuracy: float) 
     The rule cannot tell "all tied and good" from "all tied and worthless", so callers get this
     flag and can refuse to interpret the selection.
     """
-    best = max(float(r["aggregate_metrics"]["mean_trial_r2"]) for r in results)
-    return best < min_accuracy
+    vals = [float(r["aggregate_metrics"].get(metric_key, float("nan"))) for r in results]
+    vals = [v for v in vals if v == v]
+    return (max(vals) < min_accuracy) if vals else True
 
 
 def pick_best_result(

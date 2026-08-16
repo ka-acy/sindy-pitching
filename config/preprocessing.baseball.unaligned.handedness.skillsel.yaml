@@ -1,0 +1,100 @@
+dataset:
+  name: baseball_stage_b
+  standardized_pose_manifest: data/baseball/standardized_pose/manifest.csv
+  processed_root: data/baseball/processed
+pose:
+  center_joint: hip_center
+  orientation_normalization: false
+  target_joints:
+  - head
+  - neck
+  - spine
+  - left_shoulder
+  - right_shoulder
+  - left_elbow
+  - right_elbow
+  - left_wrist
+  - right_wrist
+  - left_hip
+  - right_hip
+  - left_knee
+  - right_knee
+  - left_ankle
+  - right_ankle
+preprocessing:
+  trim_motion_windows: true
+  interpolate_short_gaps: true
+  max_gap_frames: 30
+  smoothing:
+    method: savgol
+    window_length: 11
+    polyorder: 3
+  trim:
+    energy_threshold_ratio: 0.2
+    padding_frames: 4
+    min_frames: 25
+  scale_normalization: false
+features:
+  output_subdir: features
+  angle_unwrap: true
+  default_handedness: R
+  infer_handedness_for_pitching: true
+  state_vector:
+  - shoulder_rotation_angle
+  - hip_rotation_angle
+  - hip_shoulder_separation_angle
+  - dominant_elbow_flexion_angle
+  - trail_elbow_flexion_angle
+  - dominant_knee_flexion_angle
+  - trail_knee_flexion_angle
+  - lead_knee_lift
+  - stride_ankle_separation
+  - dominant_wrist_speed
+  derivative:
+    method: savgol_gradient
+    window_length: 9
+    polyorder: 3
+  alignment:
+    enabled: false
+modeling:
+  input_feature_subdir: features
+  results_root: results/equations
+  polynomial_degree: 1
+  include_bias: true
+  include_interaction: true
+  scale_features: true
+  stlsq_threshold: 0.1
+  stlsq_alpha: 0.001
+  stlsq_max_iter: 20
+  selection_metric: persistence_skill_uniform
+  complexity_penalty: 5.0e-05
+  selection_validation_fraction: 0.22
+  selection_validation_seed: 7
+  sweep:
+    polynomial_degree:
+    - 1
+    stlsq_threshold:
+    - 0.1
+    - 0.15
+    - 0.2
+    - 0.3
+    - 0.5
+    stlsq_alpha:
+    - 0.001
+evaluation:
+  feature_subdir: features
+  model_results_root: results/equations
+  evaluation_root: results/evaluation
+  plot_root: results/plots
+  reconstruction_frames: 40
+  plot_feature_names:
+  - shoulder_rotation_angle
+  - hip_shoulder_separation_angle
+  - lead_knee_lift
+  - stride_ankle_separation
+  - dominant_wrist_speed
+  max_plot_trials_per_label: 1
+  integrator: rk4
+logging:
+  write_run_log: true
+  log_dir: results/preprocessing_logs

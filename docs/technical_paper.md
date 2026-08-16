@@ -278,6 +278,20 @@ distorted by the defect — only the weak-form comparison was. Both runs are non
 degenerate, which is correct: no candidate on either sweep reaches an accuracy above zero, so
 neither selection means anything beyond "these candidates are indistinguishable".
 
+**Selecting on skill over persistence does not rescue the sweep, and the reason is instructive.**
+The fitter can now select on `persistence_skill_uniform`, computed on the validation clips during
+the sweep. The expectation was that it would discriminate where derivative R2 cannot. On the
+first-order state it does not: across the five thresholds the skill spans just 0.00088, from
+−0.00383 to −0.00471, every value negative. Selection remains degenerate and is correctly
+flagged.
+
+That is not a failure of the criterion. On the delay-augmented state of Section 6.9 the same
+metric spans **0.0378** across the same thresholds (+0.3881 down to +0.3502), forty times the
+spread, and picks a clear winner. A selection criterion can only separate candidates that
+actually differ, and first-order candidates do not differ because none of them predicts anything
+— which is Section 6.8's conclusion arriving from a third direction. The rule was worth
+repairing, but no rule can make a sweep meaningful when every candidate is equally useless.
+
 ### 6.4 State-representation sweep: what does not help
 
 Four candidate explanations for the near-zero derivative fit were tested directly, using plain ridge regression rather than STLSQ so that sparse-selection artifacts cannot confound the comparison, with GroupKFold over clips so no clip appears in both train and test (`src/preprocessing/diagnose_derivative_fit.py`, `results/analysis/derivative_fit_diagnostics.csv`):
@@ -925,11 +939,12 @@ Primary generated outputs:
 
 Ordered by what would most change the paper's conclusions.
 
-1. **Select on skill over persistence rather than derivative R2.** Section 6.3's repaired rule
-   stops sparsity from overruling accuracy, but every candidate on both sweeps is still flagged
-   degenerate because derivative R2 cannot separate them at all. Skill over persistence does
-   separate them (Section 6.9), and the pipeline now computes it, so it is the natural selection
-   criterion and would make the sweep meaningful rather than merely well-ordered.
+1. **Move the operative configuration to a delay-augmented state.** Section 6.9 shows it turns
+   +0.01 skill into +0.38, Section 6.3 shows it is also the only way to make the threshold sweep
+   discriminate at all (spread 0.0378 against 0.00088), and Section 6.8 shows the estimator is
+   not the constraint. Everything now points the same way, and the pipeline's default still fits
+   `dx/dt = f(x)` over positions. This is the single change that would most improve the
+   pipeline's own output.
 2. **Score the ensemble and second-order configurations against the frozen control with paired
    intervals.** Section 6.2's two remaining rows are still single-split, because unlike the
    others they need refitting per resample.

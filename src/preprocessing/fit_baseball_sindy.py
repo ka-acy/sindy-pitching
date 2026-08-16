@@ -215,6 +215,45 @@ def subset_by_indices[T](items: list[T], indices: list[int]) -> list[T]:
     return [items[idx] for idx in indices]
 
 
+def persistence_skill_metrics(
+    model: Any, trajectories: list[np.ndarray], dt: float, feature_names: list[str]
+) -> dict[str, float]:
+    """Skill over persistence on the core positions, for use as a selection criterion.
+
+    Derivative R2 cannot separate the candidates in this project's sweeps -- every threshold
+    lands within 0.0013 of zero -- so selection falls through to the sparsity penalty and
+    becomes meaningless. Skill over persistence does separate them, and it is the metric the
+    evaluation reports, so selecting on it makes the sweep answer the question the paper asks.
+
+    Computed directly on the scaled trajectories the model was fitted to. Per-column skill is
+    a ratio of sums of squares in that column, so a per-column scale factor cancels: the
+    uniform average is identical whether computed in scaled or original units.
+    """
+    from src.preprocessing.evaluate_baseball_sindy import CORE_POSITIONS
+
+    idx = [feature_names.index(n) for n in CORE_POSITIONS if n in feature_names]
+    if not idx or not trajectories:
+        return {"persistence_skill_uniform": float("nan"), "persistence_skill_pooled": float("nan")}
+
+    num = np.zeros(len(idx))
+    den = np.zeros(len(idx))
+    for X in trajectories:
+        if X.shape[0] < 2:
+            continue
+        pred = np.asarray(model.predict(X), dtype=np.float64)
+        true_inc = (X[1:] - X[:-1])[:, idx]
+        pred_inc = (dt * pred[:-1])[:, idx]
+        num += np.sum((true_inc - pred_inc) ** 2, axis=0)
+        den += np.sum(true_inc**2, axis=0)
+    keep = den > 0
+    if not keep.any():
+        return {"persistence_skill_uniform": float("nan"), "persistence_skill_pooled": float("nan")}
+    return {
+        "persistence_skill_uniform": float(np.mean(1.0 - num[keep] / den[keep])),
+        "persistence_skill_pooled": float(1.0 - num[keep].sum() / den[keep].sum()),
+    }
+
+
 def main() -> None:
     args = parse_args()
     config = load_config((PROJECT_ROOT / args.config).resolve())
@@ -318,6 +357,14 @@ def main() -> None:
                     validation_metrics, validation_per_trial = evaluate_model(model, validation_Xs, validation_X_dots, dt)
                 else:
                     validation_metrics, validation_per_trial = selection_metrics, selection_per_trial
+                selection_metrics = {
+                    **selection_metrics,
+                    **persistence_skill_metrics(model, selection_Xs, dt, feature_names),
+                }
+                validation_metrics = {
+                    **validation_metrics,
+                    **persistence_skill_metrics(model, validation_Xs or selection_Xs, dt, feature_names),
+                }
                 coef_rows = coefficient_rows(model, feature_names)
                 sweep_results.append(
                     {
@@ -339,12 +386,17 @@ def main() -> None:
                 accuracy_tolerance=float(modeling_cfg.get("selection_accuracy_tolerance", 0.0)),
                 min_accuracy=min_accuracy,
             )
-            degenerate = selection_is_degenerate(normalized_results, min_accuracy)
+            gate_key = ("persistence_skill_uniform"
+                        if "persistence_skill" in modeling_cfg["selection_metric"]
+                        else "mean_trial_r2")
+            degenerate = selection_is_degenerate(normalized_results, min_accuracy, metric_key=gate_key)
             if degenerate:
+                spread = max(float(r["aggregate_metrics"].get(gate_key, 0.0)) for r in normalized_results) \
+                    - min(float(r["aggregate_metrics"].get(gate_key, 0.0)) for r in normalized_results)
                 print(
                     f"  WARNING [{task_type}/{group_value}]: no candidate reached "
-                    f"mean_trial_r2 >= {min_accuracy}; the sweep selected on sparsity alone "
-                    "and the choice should not be interpreted."
+                    f"{gate_key} >= {min_accuracy} (spread across candidates {spread:.5f}); "
+                    "the selection should not be interpreted."
                 )
 
             if use_weak:
@@ -424,6 +476,7 @@ def main() -> None:
                     "validation_global_r2",
                     "validation_mean_trial_r2",
                     "validation_mean_trial_rmse",
+                    "validation_persistence_skill_uniform",
                     "num_equation_terms",
                     "selection_penalty",
                     "selection_score",
@@ -439,6 +492,7 @@ def main() -> None:
                         "validation_global_r2": result["validation_metrics"]["global_r2"],
                         "validation_mean_trial_r2": result["validation_metrics"]["mean_trial_r2"],
                         "validation_mean_trial_rmse": result["validation_metrics"]["mean_trial_rmse"],
+                        "validation_persistence_skill_uniform": result["validation_metrics"].get("persistence_skill_uniform", ""),
                         "num_equation_terms": result["num_equation_terms"],
                         "selection_penalty": result["selection_penalty"],
                         "selection_score": result["validation_metrics"]["mean_trial_r2"] - result["selection_penalty"],
