@@ -116,6 +116,49 @@ def canonicalize_feature_series(
     return canonical
 
 
+def compute_delay_state(
+    state_matrix: np.ndarray,
+    feature_names: list[str],
+    depth: int,
+    drop_features: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    """Augment the state with recent increments: [x(t), x(t)-x(t-1), ..., x(t-d+2)-x(t-d+1)].
+
+    An autonomous first-order state of joint positions does not determine its own next
+    increment, which is why the fitted equations score no better than persistence. Supplying
+    two frames of history raises skill over persistence from about +0.01 to +0.38 on the same
+    clips and the same target, and it is also the only state on which the threshold sweep
+    discriminates between candidates at all.
+
+    `drop_features` removes derived columns. `hip_shoulder_separation_angle` is shoulder
+    rotation minus hip rotation, and the identity holds near-exactly on some clip subsets, so
+    a training draw made mostly of those is rank-deficient in three columns and least squares
+    answers with enormous cancelling coefficients. Removing it takes divergence from about one
+    split in ten to none, at a cost of 0.0009 skill.
+
+    Note that this state cannot be integrated forward as a dynamical system: the delay columns
+    are not independent degrees of freedom. It is a one-step predictor, and reconstruction
+    metrics computed from it are meaningless.
+    """
+    keep = [i for i, n in enumerate(feature_names) if n not in set(drop_features)]
+    base = state_matrix[:, keep]
+    names = [feature_names[i] for i in keep]
+    if depth < 2:
+        return base, names
+
+    start = depth - 1
+    if base.shape[0] <= start:
+        return base[:0], names
+
+    blocks = [base[start:]]
+    out_names = list(names)
+    for k in range(depth - 1):
+        lo, hi = start - k, base.shape[0] - k
+        blocks.append(base[lo:hi] - base[lo - 1:hi - 1])
+        out_names += [f"d{k + 1}({n})" for n in names]
+    return np.hstack(blocks), out_names
+
+
 def compute_second_order_state(
     feature_series: dict[str, Any],
     position_names: list[str],
@@ -253,7 +296,31 @@ def main() -> None:
             handedness_source = "default"
         feature_series = canonicalize_feature_series(feature_series, resolved_handedness)
         feature_series, alignment_meta = align_feature_series(feature_series, row["task_type"], alignment_cfg)
-        if second_order:
+        delay_cfg = feature_cfg.get("delay_embedding", {}) or {}
+        use_delay = bool(delay_cfg.get("enabled", False))
+        if use_delay:
+            base_state = build_state_matrix(
+                feature_series,
+                feature_names,
+                bool(feature_cfg["angle_unwrap"]),
+            )
+            state_matrix, output_feature_names = compute_delay_state(
+                base_state,
+                feature_names,
+                int(delay_cfg.get("depth", 3)),
+                list(delay_cfg.get("drop_features", [])),
+            )
+            # Angles were already unwrapped when the base state was built, and the increment
+            # columns are differences rather than angles, so no further unwrapping applies.
+            derivative_matrix, derivative_window = estimate_derivatives(
+                state_matrix,
+                dt,
+                output_feature_names,
+                False,
+                int(feature_cfg["derivative"]["window_length"]),
+                int(feature_cfg["derivative"]["polyorder"]),
+            )
+        elif second_order:
             position_names = feature_names
             window_length = int(feature_cfg["derivative"]["window_length"])
             polyorder = int(feature_cfg["derivative"]["polyorder"])

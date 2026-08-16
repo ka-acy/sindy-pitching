@@ -631,6 +631,42 @@ The delay model is therefore stable at 27 design dimensions and about 32 terms. 
 analysis above predates this fix, which is why it had to exclude diverging splits by hand;
 repeating it on the stabilized design is listed in Section 10.
 
+**The pipeline itself now produces this result.** The findings above came from an analysis
+script; the pipeline's own default still fitted `dx/dt = f(x)` over positions. The feature
+extractor now takes a `features.delay_embedding` block (`enabled`, `depth`, `drop_features`), so
+a delay-augmented state is a first-class configuration rather than something only the analysis
+code can build. `config/preprocessing.baseball.delay.yaml` is that configuration: depth 3,
+`hip_shoulder_separation_angle` dropped per the stability finding, and selection on
+`persistence_skill_uniform`.
+
+Running the standard fit and evaluate commands on it, held out on the same 29 test clips:
+
+| metric | operative first-order | delay-augmented |
+|---|---:|---:|
+| mean derivative R2 | −0.0184 | **+0.4411** |
+| skill over persistence, uniform | −0.0041 | **+0.4071** |
+| skill over persistence, pooled | +0.0014 | +0.2193 |
+| selection flagged degenerate | yes | **no** |
+
+: The same pipeline commands on the operative and delay-augmented configurations. The delay state produces the project's first positive derivative R2 and a non-degenerate candidate sweep.
+
+Three things change at once. Derivative R2 goes positive for the first time in this project.
+Skill over persistence reaches +0.4071, slightly above the +0.3881 the analysis script obtained,
+and the difference is worth noting: the pipeline fits Savitzky-Golay derivatives rather than
+forward increments directly, so the two routes are not identical and neither is strictly better.
+And the candidate sweep is **no longer flagged degenerate** — thresholds now separate on skill
+(+0.3076 down to +0.3026 on the validation clips), so the selection means something for the
+first time.
+
+The reconstruction metrics on this configuration read −260.7 and must be ignored. A delay state
+cannot be integrated forward: its delay columns are lagged copies rather than independent degrees
+of freedom, so a free-running rollout is ill-posed. The evaluator now prints a note to that
+effect whenever it detects delay columns, so the number cannot quietly be read as a result.
+
+This configuration is offered as the recommended direction, not as a drop-in replacement for the
+operative one. It answers a different question — one-step prediction rather than trajectory
+reconstruction — and Section 6.6 is the reason that is the right question to be asking.
+
 ### 6.10 Label-validated representation study: predicting release velocity and pitch type
 
 Every result above judges the pipeline by self-prediction of the motion. The clips also carry
@@ -701,7 +737,7 @@ These are consistent, not contradictory. Section 6.6 shows the mechanism directl
 
 The defensible claim is:
 
-> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented end-to-end, together with a state-comparable reconstruction metric and a control-paired evaluation protocol in which every reported score is compared against the no-model baseline for its own task. Under that protocol three findings separate. First, no fitted configuration — first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades monotonically with model complexity. Second, the data does carry short-horizon structure: a delay-embedded linear model achieves 0.39 skill over persistence on held-out increment prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88 rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that structure as configured, but the cause is the state and not the estimator: refitting the same sparse estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30 terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. The substantive finding is this boundary together with the localization of the loss to the sparse fit and its selection rule, not to the pose, the features, the derivative estimation, or the metric.
+> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented end-to-end, together with a state-comparable reconstruction metric and a control-paired evaluation protocol in which every reported score is compared against the no-model baseline for its own task. Under that protocol three findings separate. First, no fitted configuration — first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades monotonically with model complexity. Second, the data does carry short-horizon structure: a delay-embedded linear model achieves 0.39 skill over persistence on held-out increment prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88 rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that structure as configured, but the cause is the state and not the estimator: the same sparse estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30 terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. That state is now a first-class pipeline configuration, and running the standard commands on it yields +0.4071 skill and the project's first positive derivative R2 (+0.4411). The substantive finding is this boundary together with the localization of the loss to the sparse fit and its selection rule, not to the pose, the features, the derivative estimation, or the metric.
 
 Two things this work must not claim. The results are not evidence of recovered governing laws of pitching mechanics: 26 coefficients that predict increments 39 percent better than persistence are not a biomechanical model, and the discovered equations have not been validated against any external quantity. And the weak-form configuration must not be presented as a successful model.
 
@@ -846,6 +882,20 @@ version control, so this must run before the paper is built:
 ./.venv/bin/python src/analysis/make_paper_figures.py
 ```
 
+Run the delay-augmented configuration end to end (Section 6.9):
+
+```bash
+for split in train test; do
+  ./.venv/bin/python src/preprocessing/extract_baseball_features.py \
+    --config config/preprocessing.baseball.delay.yaml --split $split
+done
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.delay.yaml --split train --task-types pitching
+./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py \
+  --config config/preprocessing.baseball.delay.yaml \
+  --train-split train --eval-split test --task-types pitching
+```
+
 Compare the old and repaired selection rules (Section 6.3):
 
 ```bash
@@ -939,12 +989,13 @@ Primary generated outputs:
 
 Ordered by what would most change the paper's conclusions.
 
-1. **Move the operative configuration to a delay-augmented state.** Section 6.9 shows it turns
-   +0.01 skill into +0.38, Section 6.3 shows it is also the only way to make the threshold sweep
-   discriminate at all (spread 0.0378 against 0.00088), and Section 6.8 shows the estimator is
-   not the constraint. Everything now points the same way, and the pipeline's default still fits
-   `dx/dt = f(x)` over positions. This is the single change that would most improve the
-   pipeline's own output.
+1. **Decide whether the delay-augmented configuration becomes the operative default.** It is now
+   a first-class pipeline configuration (Section 6.9) and beats the current default on every
+   metric that discriminates: derivative R2 +0.4411 against −0.0184, skill +0.4071 against
+   −0.0041, and a non-degenerate candidate sweep. What holds the decision open is that it answers
+   a different question — one-step prediction rather than free-running reconstruction — so
+   switching means changing what the pipeline is for. That is an editorial call, not a technical
+   one.
 2. **Score the ensemble and second-order configurations against the frozen control with paired
    intervals.** Section 6.2's two remaining rows are still single-split, because unlike the
    others they need refitting per resample.

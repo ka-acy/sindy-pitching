@@ -294,6 +294,17 @@ def main() -> None:
             skill_uniforms: list[float] = []
             plotted = 0
 
+            # A delay-augmented state cannot be integrated forward: its delay columns are
+            # lagged copies rather than independent degrees of freedom, so a free-running
+            # rollout is ill-posed and its reconstruction score is not interpretable. Say so
+            # once per group rather than let a reader treat the number as a result.
+            if any(n.startswith("d1(") or n.startswith("d2(") for n in items[0][3]):
+                print(
+                    f"  NOTE [{task_type}/{group_value}]: delay-augmented state detected; "
+                    "reconstruction and core-position metrics below are NOT meaningful for it. "
+                    "Read persistence_skill_* instead."
+                )
+
             for row, X, X_dot, feature_names, metadata in items:
                 dt = float(row["dt"])
                 X_scaled = transform_trajectories([X], scaler)[0] if scaler is not None else X
