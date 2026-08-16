@@ -28,6 +28,7 @@ from src.preprocessing.fit_utd_mhad_sindy import (
     equation_text,
     load_feature_payload,
     pick_best_result,
+    selection_is_degenerate,
     write_csv,
     write_json,
     write_text,
@@ -331,7 +332,20 @@ def main() -> None:
                     }
                 )
             normalized_results = [{**result, "aggregate_metrics": result["validation_metrics"]} for result in sweep_results]
-            best_result = pick_best_result(normalized_results, modeling_cfg["selection_metric"])
+            min_accuracy = float(modeling_cfg.get("selection_min_accuracy", 0.0))
+            best_result = pick_best_result(
+                normalized_results,
+                modeling_cfg["selection_metric"],
+                accuracy_tolerance=float(modeling_cfg.get("selection_accuracy_tolerance", 0.0)),
+                min_accuracy=min_accuracy,
+            )
+            degenerate = selection_is_degenerate(normalized_results, min_accuracy)
+            if degenerate:
+                print(
+                    f"  WARNING [{task_type}/{group_value}]: no candidate reached "
+                    f"mean_trial_r2 >= {min_accuracy}; the sweep selected on sparsity alone "
+                    "and the choice should not be interpreted."
+                )
 
             if use_weak:
                 final_model = build_weakform_model(best_result["candidate_config"], scaled_Xs, dt, weak_cfg)
@@ -363,6 +377,7 @@ def main() -> None:
                     "scaler_applied": bool(modeling_cfg.get("scale_features", False)),
                     "selection_train_clips": len(train_idx),
                     "selection_validation_clips": len(val_idx),
+                    "selection_degenerate": degenerate,
                     **aggregate_metrics,
                 },
             )
@@ -379,6 +394,7 @@ def main() -> None:
                     "num_clips": len(group_items),
                     "dt": dt,
                     "selection_metric": modeling_cfg["selection_metric"],
+                    "selection_degenerate": degenerate,
                     "selection_validation_fraction": validation_fraction,
                     "selection_validation_seed": validation_seed,
                     "selection_train_clips": len(train_idx),
@@ -447,6 +463,7 @@ def main() -> None:
                     "stlsq_threshold": best_result["candidate_config"]["stlsq_threshold"],
                     "stlsq_alpha": best_result["candidate_config"]["stlsq_alpha"],
                     "selection_validation_clips": len(val_idx),
+                    "selection_degenerate": degenerate,
                 }
             )
 
@@ -466,6 +483,7 @@ def main() -> None:
             "stlsq_threshold",
             "stlsq_alpha",
             "selection_validation_clips",
+            "selection_degenerate",
         ],
         summary_rows,
     )

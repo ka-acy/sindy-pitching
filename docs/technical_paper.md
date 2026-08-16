@@ -255,6 +255,29 @@ Every candidate's validation R2 lies in a band of width 0.0013 around zero, so t
 
 This is why the frozen control is necessary. Without it, a near-null model reads as a 3.7x improvement.
 
+**The rule is now repaired.** `pick_best_result` gains an `accuracy_gated_sparsity` metric that
+keeps every candidate within a configurable tolerance of the best accuracy and takes the sparsest
+of those, so sparsity breaks ties rather than overruling accuracy. Independently, the fitter now
+computes a `selection_degenerate` flag: if no candidate reaches `selection_min_accuracy`
+(default 0, since a candidate below zero is worse than predicting the mean), the sweep had
+nothing to discriminate on and the choice should not be interpreted. The flag is written to
+`summary.csv` and `config.json` and printed as a warning. Both changes are additive, so the
+Stage A fitter's behaviour is unchanged unless a config opts in.
+
+| configuration | `sparsity_weighted_r2` | `accuracy_gated_sparsity` | flagged degenerate |
+|---|---|---|:--:|
+| weak-form | threshold 0.30, **1 term** | threshold 0.10, **29 terms** | yes |
+| first-order (operative) | threshold 0.20, 26 terms | threshold 0.20, 26 terms | yes |
+
+: Selection under the old and repaired rules. The weak-form choice changes completely; the operative configuration does not.
+
+Two things follow. The repaired rule would not have produced the near-null weak-form model: it
+selects the most accurate candidate rather than the emptiest. And **the operative first-order
+configuration selects identically under both rules**, so the paper's headline model was never
+distorted by the defect — only the weak-form comparison was. Both runs are nonetheless flagged
+degenerate, which is correct: no candidate on either sweep reaches an accuracy above zero, so
+neither selection means anything beyond "these candidates are indistinguishable".
+
 ### 6.4 State-representation sweep: what does not help
 
 Four candidate explanations for the near-zero derivative fit were tested directly, using plain ridge regression rather than STLSQ so that sparse-selection artifacts cannot confound the comparison, with GroupKFold over clips so no clip appears in both train and test (`src/preprocessing/diagnose_derivative_fit.py`, `results/analysis/derivative_fit_diagnostics.csv`):
@@ -809,6 +832,17 @@ version control, so this must run before the paper is built:
 ./.venv/bin/python src/analysis/make_paper_figures.py
 ```
 
+Compare the old and repaired selection rules (Section 6.3):
+
+```bash
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
+  --split train --task-types pitching
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.gated.yaml \
+  --split train --task-types pitching
+```
+
 Reproduce the Section 6.2 paired control intervals (requires the per-clip control scores, which
 `evaluate_static_baseline.py` writes alongside its summary):
 
@@ -889,19 +923,40 @@ Primary generated outputs:
 
 ## 10. Next Work
 
-1. Report skill over persistence from `evaluate_baseball_sindy.py` directly, so the pipeline's own evaluation emits the metric the project now judges models by, rather than requiring a separate diagnostic script. The reconstruction metrics should stay alongside it for continuity.
-2. Make short-horizon increment prediction the pipeline's primary reported task, since it is the one the data supports, and carry skill over persistence into `evaluate_baseball_sindy.py` so it is emitted on every run rather than by a separate diagnostic.
-3. Give the sparse model a state that determines its target, since Section 6.8 shows this and not the estimator is where the skill is lost. Concretely: fit SINDy on a delay-augmented state, or on the second-order state with acceleration as the target, and score skill over persistence. Sweeping the sparse estimator is not worth further effort — dense ridge and the best STLSQ differ by 0.0003. The one estimator change worth making is lowering the operative STLSQ threshold from 0.2, which currently zeroes the first-order fit entirely.
-4. Report the frozen and persistence controls alongside every score in all future comparisons, with both aggregations, and treat sign disagreement between aggregations as a null result.
-5. Replace or repair the model-selection rule so that it does not reduce to term-count minimization when candidate accuracies are statistically indistinguishable; require a minimum accuracy margin before the sparsity penalty is allowed to decide.
-6. Report confidence intervals across repeated train/test splits rather than relying on one split.
-7. Extend the horizon sweep with longer clips to test whether the crossover hinted at H=240 is real.
-8. Re-score the alignment track under the current pool and the core-position metric (Section 6.8).
-9. Add automated pose-quality metrics and exclude low-confidence or heavily occluded clips.
-10. Add figures: observed versus reconstructed trajectories with the frozen control drawn for reference, and a skill-versus-horizon curve with persistence at zero.
-11. Pursue the label-validated representation study (`docs/superpowers/specs/2026-06-23-representation-study-design.md`), which asks whether these representations predict release speed and pitch type. Given Section 6.5, the relevant question is now whether the short-horizon structure is the same structure that carries label information.
+Ordered by what would most change the paper's conclusions.
 
-Explicitly deprioritized on the evidence in Section 6.4: per-pitcher, per-pitch-type, and per-phase conditioning (the per-clip oracle result shows heterogeneity is not the constraint); non-autonomous or phase-augmented state vectors (no gain in three forms); and further model-class substitution on the current feature set.
+1. **Select on skill over persistence rather than derivative R2.** Section 6.3's repaired rule
+   stops sparsity from overruling accuracy, but every candidate on both sweeps is still flagged
+   degenerate because derivative R2 cannot separate them at all. Skill over persistence does
+   separate them (Section 6.9), and the pipeline now computes it, so it is the natural selection
+   criterion and would make the sweep meaningful rather than merely well-ordered.
+2. **Score the ensemble and second-order configurations against the frozen control with paired
+   intervals.** Section 6.2's two remaining rows are still single-split, because unlike the
+   others they need refitting per resample.
+3. **Extend the horizon sweep with longer clips** to test whether the crossover hinted at
+   H = 240 (Section 6.6, 13 clips) is real. It is the one place a fitted model came close to
+   the control.
+4. **Re-score the alignment track** under the current pool and the core-position metric
+   (Section 6.11). It has never been evaluated on comparable footing, so the unaligned default
+   rests on a superseded comparison.
+5. **Add automated pose-quality metrics** and exclude low-confidence or heavily occluded clips,
+   which is the one untested route to raising the ceiling on the pitching data.
+6. **Batting needs a better pose front-end, not more selection heuristics.** On 20 clips the
+   batter is detected at all in only 78 percent, and the best of seven selection rules reaches
+   71 percent on the clips where he is (`src/analysis/label_batter_tracks.py`), so roughly half
+   of a batting dataset would be the umpire or the pitcher. A labelled set now exists so rules
+   can be scored rather than eyeballed. Cropping the plate region and truncating at camera pan
+   both work and are worth keeping; what is missing is detection of the batter himself.
+
+Standing practice rather than tasks: report the no-model control for the specific task being
+scored, under both aggregations, and treat sign disagreement between them as a null result.
+
+Explicitly deprioritized on evidence gathered here: per-pitcher, per-pitch-type and per-phase
+conditioning (the per-clip oracle in Section 6.4 shows heterogeneity is not the constraint);
+non-autonomous or phase-augmented state vectors (no gain in three forms); further sparse-estimator
+substitution (dense and sparse intervals overlap, Section 6.8); and additional representations for
+the label study, since its reference R0 — a 70-dimensional kinematic summary — already shows no
+velocity signal (Section 6.10).
 
 ## 11. Proposed Contribution
 
