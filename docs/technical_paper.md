@@ -690,19 +690,28 @@ All 140 clips, 5-fold stratified cross-validation repeated 20 times, 200 permuta
 0.95 variance applied identically to every representation
 (`src/analysis/run_representation_study.py`, `results/analysis/representation_study/`).
 
-| representation | task | score | 95% CI | baseline | p |
-|---|---|---:|---|---:|---:|
-| R0 kinematic summary (reference) | T1 speed, CV R2 | -0.0179 | [-0.027, -0.009] | -0.0035 | 0.63 |
-| R1 per-clip SINDy coefficients | T1 speed, CV R2 | -0.0218 | [-0.035, -0.009] | -0.0035 | 0.63 |
-| R0 kinematic summary (reference) | T2 class, bal. acc. | 0.4546 | [0.437, 0.472] | 0.4919 | 0.82 |
-| R1 per-clip SINDy coefficients | T2 class, bal. acc. | 0.5504 | [0.531, 0.570] | 0.4919 | 0.19 |
+| representation | dims | T1 speed, CV R2 | p | T2 class, bal. acc. | p |
+|---|---:|---:|---:|---:|---:|
+| R0 kinematic summary (reference) | 70 | -0.0179 | 0.63 | 0.4546 | 0.82 |
+| R1 per-clip SINDy coefficients | 110 | -0.0218 | 0.63 | 0.5504 | 0.19 |
+| R2 per-clip weak-form coefficients | 110 | -0.0035 | 0.33 | 0.5000 | 1.00 |
+| R3 DMD spectrum | 30 | -0.0133 | 0.54 | 0.4373 | 0.88 |
+| R4 Hankel (time-delay) DMD spectrum | 30 | -0.0201 | 0.64 | 0.4833 | 0.67 |
 
-: Label-prediction results against baseline and permutation null. The pre-registered primary endpoint is null for both representations.
+: All five representations against the T1 baseline of -0.0035 and the T2 baseline of 0.4919, with permutation p-values. Not one clears either bar. Mean absolute error on T1 ranges 5.32 to 5.37 mph against a 5.32 mph mean-predictor baseline.
 
-**The primary endpoint is null.** Neither representation predicts release velocity: mean
-absolute error is 5.35 mph against a 5.32 mph mean-predictor baseline, and both p-values are
-0.63. R0 fails as well, so this is not a case of dynamics failing to add value over a
-kinematic summary — there is no velocity signal in either.
+**The primary endpoint is null for all five representations.** None predicts release velocity: mean absolute
+error spans 5.32 to 5.37 mph against a 5.32 mph mean-predictor baseline, and every p-value lies
+between 0.33 and 0.64. R0 fails as well, so this is not a case of dynamics failing to add value
+over a kinematic summary — there is no velocity signal in any of them.
+
+The five span genuinely different descriptions of a clip: descriptive statistics with no dynamics
+(R0), sparse library coefficients (R1), the same fitted through the noise-robust weak formulation
+(R2), the spectrum of the best-fit linear operator (R3), and that spectrum on a delay-embedded
+state (R4). R4 is included because Section 6.8 shows history is what these trajectories need, so
+if any spectral description were to carry velocity information it should be that one. It does not
+(R2 = -0.0201, p = 0.64). R2 is the closest to its baseline at -0.0035, which is exactly the
+mean-predictor value: its regression is returning the training mean, not finding structure.
 
 **The secondary endpoint illustrates why the null matters.** R1's balanced accuracy of 0.5504
 has a 95% confidence interval that excludes the 0.4919 baseline, which reads as a win. Its
@@ -712,7 +721,7 @@ permutation null is computed through the identical pipeline on shuffled labels. 
 null. Component importances were not examined, because interpreting coefficient loadings
 under a null result would be fishing.
 
-**Interpretation.** With 140 clips against 70 to 110 dimensions and a 5.3 mph baseline spread,
+**Interpretation.** With 140 clips against 30 to 110 dimensions and a 5.3 mph baseline spread,
 only a large effect is detectable, so absence of signal here cannot be distinguished from
 insufficient power. Piergiovanni and Ryoo [4] attempt the same prediction from the same
 broadcast footage and describe it as extremely difficult, which is consistent. This endpoint
@@ -1024,9 +1033,10 @@ scored, under both aggregations, and treat sign disagreement between them as a n
 Explicitly deprioritized on evidence gathered here: per-pitcher, per-pitch-type and per-phase
 conditioning (the per-clip oracle in Section 6.4 shows heterogeneity is not the constraint);
 non-autonomous or phase-augmented state vectors (no gain in three forms); further sparse-estimator
-substitution (dense and sparse intervals overlap, Section 6.8); and additional representations for
-the label study, since its reference R0 — a 70-dimensional kinematic summary — already shows no
-velocity signal (Section 6.10).
+substitution (dense and sparse intervals overlap, Section 6.8); and further representations for the
+label study: all five of the pre-registered set have now been evaluated and none clears either
+bar (Section 6.10), including the delay-embedded spectrum that Section 6.8's finding would
+predict to be the most promising.
 
 ## 11. Proposed Contribution
 
