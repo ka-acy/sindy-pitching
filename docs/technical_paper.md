@@ -1007,12 +1007,16 @@ Ordered by what would most change the paper's conclusions.
    rests on a superseded comparison.
 5. **Add automated pose-quality metrics** and exclude low-confidence or heavily occluded clips,
    which is the one untested route to raising the ceiling on the pitching data.
-6. **Batting needs a better pose front-end, not more selection heuristics.** On 20 clips the
-   batter is detected at all in only 78 percent, and the best of seven selection rules reaches
-   71 percent on the clips where he is (`src/analysis/label_batter_tracks.py`), so roughly half
-   of a batting dataset would be the umpire or the pitcher. A labelled set now exists so rules
-   can be scored rather than eyeballed. Cropping the plate region and truncating at camera pan
-   both work and are worth keeping; what is missing is detection of the batter himself.
+6. **Batting needs a different pose model, and this is now measured rather than suspected.** The
+   batter is detected at all in only 78 percent of clips, and the best of seven selection rules
+   reaches 71 percent on the clips where he is, so roughly half of a batting dataset would be the
+   umpire or the pitcher. Upscaling the plate crop to 3x and 4x and loosening the detection
+   threshold do not fix it: on the clips where the batter is missed he remains missed, while the
+   umpire and catcher beside him are found, even though he is large, unoccluded and well lit at
+   that scale. The limit is therefore the detector on this subject and not the input resolution,
+   so the next step is a different pose model or an upstream person detector feeding
+   single-person crops — not another selection heuristic. Cropping the plate region, truncating
+   at camera-pan onset, and the labelled set for scoring rules are all worth keeping.
 
 Standing practice rather than tasks: report the no-model control for the specific task being
 scored, under both aggregations, and treat sign disagreement between them as a null result.
