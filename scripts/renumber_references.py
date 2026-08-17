@@ -98,6 +98,13 @@ BIB: dict[str, str] = {
     "varma2006": 'S. Varma and R. Simon, "Bias in error estimation when using cross-validation '
         'for model selection," *BMC Bioinformatics*, vol. 7, art. no. 91, 2006, '
         "doi: 10.1186/1471-2105-7-91.",
+    "aguinaldo2007": 'A. L. Aguinaldo, J. Buttermore, and H. Chambers, "Effects of upper trunk '
+        'rotation on shoulder joint torque among baseball pitchers of various levels," *J. Appl. '
+        "Biomech.*, vol. 23, no. 1, pp. 42–51, Feb. 2007, doi: 10.1123/jab.23.1.42.",
+    "rosenberg2024": 'M. C. Rosenberg, J. L. Proctor, and K. M. Steele, "Quantifying changes in '
+        'individual-specific template-based representations of center-of-mass dynamics during '
+        'walking with ankle exoskeletons using Hybrid-SINDy," *Sci. Rep.*, vol. 14, '
+        "art. no. 1031, 2024, doi: 10.1038/s41598-023-50999-0.",
     "matsuo2001": 'T. Matsuo, G. S. Fleisig, R. F. Escamilla, S. W. Barrentine, and '
         'J. R. Andrews, "Comparison of kinematic and temporal parameters between different pitch '
         'velocity groups," *J. Appl. Biomech.*, vol. 17, no. 1, pp. 1–13, 2001.',
