@@ -10,7 +10,7 @@ Four intermediate results in this project were false positives that survived onl
 
 ## 1. Introduction
 
-Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale; the canonical kinetic descriptions of pitching mechanics were established this way [1]. Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits. Markerless pose estimation has been validated against marker-based capture for gait, where joint-angle agreement is good for large sagittal motions and degrades for smaller out-of-plane rotations [2]; broadcast footage is a substantially harder case than the controlled multi-camera setting used in that comparison.
+Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale; the canonical kinetic descriptions of pitching mechanics were established this way [1], and the sequence they describe — stride, pelvis rotation, upper-torso rotation, elbow extension, shoulder internal rotation, wrist flexion — is the proximal-to-distal kinetic chain this paper tests against in Section 6.9 [2]. Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits. Markerless pose estimation has been validated against marker-based capture for gait, where joint-angle agreement is good for large sagittal motions and degrades for smaller out-of-plane rotations [3]; broadcast footage is a substantially harder case than the controlled multi-camera setting used in that comparison.
 
 This project investigates whether a machine-vision and sparse-dynamics workflow can produce reproducible mathematical artifacts from baseball pitching motion. The goal is not to claim that the current dataset explains elite pitching mechanics. The goal is to establish a defensible technical pipeline that can ingest pose trajectories, condition them into stable feature matrices, estimate derivatives, and fit sparse dynamical models that can be compared across preprocessing and modeling configurations under a common evaluation protocol.
 
@@ -35,15 +35,15 @@ Stage B replaces only the input-pose layer with baseball-specific standardized p
 
 ### 4.1 Stage A Validation Data
 
-Stage A uses UTD-MHAD [3] as a proxy human-motion dataset. The selected proxy actions are labeled as `batting_like` and `pitching_like` to test rotational and ballistic motion processing. These labels are methodological categories and do not imply that UTD-MHAD motions reproduce baseball mechanics.
+Stage A uses UTD-MHAD [4] as a proxy human-motion dataset. The selected proxy actions are labeled as `batting_like` and `pitching_like` to test rotational and ballistic motion processing. These labels are methodological categories and do not imply that UTD-MHAD motions reproduce baseball mechanics.
 
 ### 4.2 Stage B Baseball Data
 
-Stage B uses local baseball clips drawn from the MLB-YouTube dataset [4], represented in `data/baseball/metadata/clip_manifest.csv`, with local-media split files under `data/baseball/splits/` and standardized pose payloads registered under `data/baseball/standardized_pose/`. MediaPipe pose exports are imported into a 15-joint schema compatible with the Stage A skeleton format.
+Stage B uses local baseball clips drawn from the MLB-YouTube dataset [5], represented in `data/baseball/metadata/clip_manifest.csv`, with local-media split files under `data/baseball/splits/` and standardized pose payloads registered under `data/baseball/standardized_pose/`. MediaPipe pose exports are imported into a 15-joint schema compatible with the Stage A skeleton format.
 
 The current pitching pool is **140 clips** (`data/baseball/splits/pitching_local_pool.csv`), split into **111 training clips** (`pitching_local_train.csv`) and **29 held-out test clips** (`pitching_local_test.csv`). All clips come from a single consistent camera view (`broadcast_centerfield`). The effective sampling interval is `dt = 0.016683 s` (approximately 59.9 fps).
 
-Each clip additionally carries `pitch_type` and `pitch_speed_mph` labels in the pool CSV. These labels are not used by the dynamics pipeline described here; they are recorded for the label-validated representation study scoped in `docs/superpowers/specs/2026-06-23-representation-study-design.md`. Piergiovanni and Ryoo [4] attempt pitch-speed and pitch-type prediction from the same broadcast footage and describe it as extremely difficult, which is the relevant prior for that study.
+Each clip additionally carries `pitch_type` and `pitch_speed_mph` labels in the pool CSV. These labels are not used by the dynamics pipeline described here; they are recorded for the label-validated representation study scoped in `docs/superpowers/specs/2026-06-23-representation-study-design.md`. Piergiovanni and Ryoo [5] attempt pitch-speed and pitch-type prediction from the same broadcast footage and describe it as extremely difficult, which is the relevant prior for that study.
 
 Generated arrays, processed features, models, and result summaries are intentionally excluded from version control by `.gitignore`. They are reproducible from the commands in Section 8.
 
@@ -57,11 +57,11 @@ Each baseball pose clip is stored as a compressed `.npz` payload containing:
 - `joint_names`: ordered joint labels
 - `metadata`: JSON-serializable clip and pose-source metadata
 
-The preferred joint schema contains 15 joints: head, neck, spine, shoulders, elbows, wrists, hips, knees, and ankles. The current adapter maps the larger MediaPipe landmark set into this schema. Pose is produced by the MediaPipe framework [5] using its BlazePose topology [6], which is a monocular on-device estimator rather than a calibrated multi-camera system.
+The preferred joint schema contains 15 joints: head, neck, spine, shoulders, elbows, wrists, hips, knees, and ankles. The current adapter maps the larger MediaPipe landmark set into this schema. Pose is produced by the MediaPipe framework [6] using its BlazePose topology [7], which is a monocular on-device estimator rather than a calibrated multi-camera system.
 
 ### 5.2 Preprocessing
 
-The baseball preprocessing script repairs leading and trailing missing values by edge fill, interpolates internal gaps, centers trajectories at the hip-center proxy, optionally applies orientation and scale normalization, smooths coordinates with a Savitzky-Golay filter [7], and trims low-motion frames around the action window.
+The baseball preprocessing script repairs leading and trailing missing values by edge fill, interpolates internal gaps, centers trajectories at the hip-center proxy, optionally applies orientation and scale normalization, smooths coordinates with a Savitzky-Golay filter [8], and trims low-motion frames around the action window.
 
 The operative baseball configuration is `config/preprocessing.baseball.unaligned.handedness.yaml`, which uses:
 
@@ -95,7 +95,7 @@ Derivatives are estimated with Savitzky-Golay differentiation using window lengt
 
 ### 5.4 Sparse Model Identification
 
-Sparse models are fit by the SINDy method of Brunton et al. [8], which selects a parsimonious set of library terms for `dx/dt` by sequentially thresholded least squares (STLSQ). The implementation is PySINDy [9], [10], using a polynomial library with bias and interaction terms, feature scaling enabled, and STLSQ sparse regression. The operative configuration uses:
+Sparse models are fit by the SINDy method of Brunton et al. [9], which selects a parsimonious set of library terms for `dx/dt` by sequentially thresholded least squares (STLSQ). The implementation is PySINDy [10], [11], using a polynomial library with bias and interaction terms, feature scaling enabled, and STLSQ sparse regression. The operative configuration uses:
 
 - polynomial degree: 1
 - STLSQ alpha: 0.001
@@ -106,9 +106,9 @@ Sparse models are fit by the SINDy method of Brunton et al. [8], which selects a
 
 The STLSQ threshold is **not fixed**; it is swept over `{0.1, 0.15, 0.2, 0.3, 0.5}` and selected by the sparsity-weighted score on the held-out selection split. For the operative first-order configuration the sweep selects **threshold 0.2**, yielding **26 equation terms**. Section 6.3 documents a degeneracy in this selection rule.
 
-A weak-form variant is available at `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`, gated by `modeling.weak_form.enabled`. This uses the weak, integral formulation of Messenger and Bortz [11], [12], which replaces pointwise derivative estimates with integrals against test functions and is therefore substantially more robust to measurement noise — the motivation for trying it on broadcast-derived pose. It fits a `WeakPDELibrary` SINDy over stacked per-trajectory weak systems across all 111 training clips, then transplants the resulting coefficients into a plain polynomial-library SINDy so the standard predict and simulate paths apply unchanged. Because `WeakPDELibrary` places its test-function subdomains via the global NumPy RNG with no seed parameter, a single draw is neither reproducible nor low-variance; the implementation seeds locally (restoring prior RNG state) and stacks `n_seeds` independent subdomain draws. The operative weak-form settings are `K: 100`, `seed: 7`, `n_seeds: 5`.
+A weak-form variant is available at `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`, gated by `modeling.weak_form.enabled`. This uses the weak, integral formulation of Messenger and Bortz [12], [13], which replaces pointwise derivative estimates with integrals against test functions and is therefore substantially more robust to measurement noise — the motivation for trying it on broadcast-derived pose. It fits a `WeakPDELibrary` SINDy over stacked per-trajectory weak systems across all 111 training clips, then transplants the resulting coefficients into a plain polynomial-library SINDy so the standard predict and simulate paths apply unchanged. Because `WeakPDELibrary` places its test-function subdomains via the global NumPy RNG with no seed parameter, a single draw is neither reproducible nor low-variance; the implementation seeds locally (restoring prior RNG state) and stacks `n_seeds` independent subdomain draws. The operative weak-form settings are `K: 100`, `seed: 7`, `n_seeds: 5`.
 
-An ensemble variant at `config/preprocessing.baseball.unaligned.handedness.ensemble.yaml` wraps the optimizer in bootstrap aggregation following Ensemble-SINDy [13], which is intended to improve robustness in the low-data, high-noise regime that applies here.
+STLSQ is one sparse optimizer among several; relaxed-regularization alternatives are surveyed and unified by Champion et al. [14], and Section 6.8 reports what changing the optimizer does here. An ensemble variant at `config/preprocessing.baseball.unaligned.handedness.ensemble.yaml` wraps the optimizer in bootstrap aggregation following Ensemble-SINDy [15], which is intended to improve robustness in the low-data, high-noise regime that applies here.
 
 The model outputs include equations, coefficient matrices, model-selection logs, scaler metadata, per-trial metrics, and summary CSVs.
 
@@ -133,7 +133,7 @@ Simulation stability (finite and bounded trajectories) is reported separately. S
 skill = 1 - SSE(model) / SSE(zero-increment)
 ```
 
-where the target is `delta(t) = x(t+1) - x(t)`. This is the standard mean-square-error skill score, in which accuracy is expressed relative to a trivial reference forecast rather than in absolute terms [14]; persistence is the reference here, and the climatological analogue — the window mean — is what the reconstruction R2 above uses. Skill is 0 for persistence by construction, and positive skill means predictive structure beyond "nothing changes."
+where the target is `delta(t) = x(t+1) - x(t)`. This is the standard mean-square-error skill score, in which accuracy is expressed relative to a trivial reference forecast rather than in absolute terms [16]; persistence is the reference here, and the climatological analogue — the window mean — is what the reconstruction R2 above uses. Skill is 0 for persistence by construction, and positive skill means predictive structure beyond "nothing changes."
 
 `evaluate_baseball_sindy.py` computes this on every run, as `persistence_skill_pooled` and `persistence_skill_uniform` per clip and `mean_persistence_skill_*` in the summary, so the metric the project judges models by is emitted by the pipeline itself rather than by a separate diagnostic. The reconstruction metrics remain alongside it.
 
@@ -193,7 +193,7 @@ Held-out summary (`results/evaluation/baseball/train_on_test/summary.csv`). The 
 
 Those are single-split figures. Because every configuration was scored on the same 29 held-out
 clips, the comparison against the control is naturally **paired**, and a paired statistic is
-far tighter than resampling two means independently. Bootstrapping the per-clip difference over
+far tighter than resampling two means independently. Bootstrapping [17] the per-clip difference over
 clips — not over frames, since frames within a clip are strongly dependent and would understate
 the uncertainty — gives (`src/analysis/paired_control_intervals.py`):
 
@@ -315,7 +315,7 @@ Two conclusions follow.
 
 **The state representation, not clip heterogeneity, is the binding constraint.** The per-clip oracle scores only +0.25 *in sample*, lower than a delay-embedded model scores on *held-out* clips (+0.69). A single clip cannot be fit well in the plain 10-D state even when the model is allowed to see it. This rules out the per-pitcher, per-pitch-type, and per-phase conditioning directions, which all address heterogeneity.
 
-The delay-embedded rows follow Takens [15], whose embedding theorem motivates reconstructing a state from lagged observations of a single trajectory, and the specific use of delay coordinates to obtain a linear model of nonlinear dynamics follows the HAVOK construction of Brunton et al. [16]. Their apparent gain must nonetheless be discounted: an unfitted backward difference already reaches +0.3507, so roughly half of the +0.69 is numerical differentiation recovered from position history rather than learned dynamics.
+The delay-embedded rows follow Takens [18], whose embedding theorem motivates reconstructing a state from lagged observations of a single trajectory, and the specific use of delay coordinates to obtain a linear model of nonlinear dynamics follows the HAVOK construction of Brunton et al. [19]. Their apparent gain must nonetheless be discounted: an unfitted backward difference already reaches +0.3507, so roughly half of the +0.69 is numerical differentiation recovered from position history rather than learned dynamics.
 
 ### 6.5 Short-horizon prediction: the one task that succeeds
 
@@ -355,7 +355,7 @@ Pooled skill is positive at every horizon; uniform skill is negative at every ho
 
 The H=240 row is the only sign of the crossover one would expect as persistence degrades — core R2 −1.87 against persistence −2.73 — but uniform skill is still negative there and only 13 clips are long enough to qualify. It is recorded as a direction to test with longer clips, not as a result.
 
-A separate verification confirms the rollout failure is genuine rather than an implementation artifact. Teacher-forcing the same model, so true history is supplied at each step and no error compounds, scores +0.7569 core R2 against persistence's +0.8453 (`results/evaluation/baseball/forecast_baselines/summary.csv`). The map is sound; free-running divergence is real error compounding. Note that this teacher-forced score is itself below persistence, so it is not an additional positive result — it is only evidence that `rollout_delay` is correct.
+A separate verification confirms the rollout failure is genuine rather than an implementation artifact. Teacher-forcing the same model, so true history is supplied at each step and no error compounds, scores +0.7569 core R2 against persistence's +0.8453 (`results/evaluation/baseball/forecast_baselines/summary.csv`). The map is sound; free-running divergence is real error compounding — the quadratic-in-horizon growth that arises whenever a model is fed its own predictions instead of ground truth, and the reason one-step accuracy does not imply rollout accuracy [20]. Note that this teacher-forced score is itself below persistence, so it is not an additional positive result — it is only evidence that `rollout_delay` is correct.
 
 
 ![Core-position reconstruction R2 by rollout horizon. The left panel shows the full range; the right panel zooms to the comparison that matters. The frozen control outscores both fitted models at every horizon.](results/figures/fig2_horizon.pdf){width=100%}
@@ -683,8 +683,8 @@ The protocol was fixed before any result was inspected:
   representation must beat it to be interesting.
 - **Secondary** T2, binary fast (fastball, sinker; 44 clips) versus offspeed (changeup,
   curveball, knucklecurve, slider; 96 clips), balanced accuracy.
-- **Significance** permutation null on the labels. A result counts only if it beats both the
-  trivial baseline and the null.
+- **Significance** permutation null on the labels, following the procedure of Ojala and Garriga
+  [21]. A result counts only if it beats both the trivial baseline and the null.
 
 All 140 clips, 5-fold stratified cross-validation repeated 20 times, 200 permutations, PCA at
 0.95 variance applied identically to every representation
@@ -707,7 +707,8 @@ over a kinematic summary — there is no velocity signal in any of them.
 
 The five span genuinely different descriptions of a clip: descriptive statistics with no dynamics
 (R0), sparse library coefficients (R1), the same fitted through the noise-robust weak formulation
-(R2), the spectrum of the best-fit linear operator (R3), and that spectrum on a delay-embedded
+(R2), the spectrum of the best-fit linear operator, that is dynamic mode decomposition
+[22] (R3), and that spectrum on a delay-embedded
 state (R4). R4 is included because Section 6.8 shows history is what these trajectories need, so
 if any spectral description were to carry velocity information it should be that one. It does not
 (R2 = -0.0201, p = 0.64). R2 is the closest to its baseline at -0.0035, which is exactly the
@@ -716,14 +717,16 @@ mean-predictor value: its regression is returning the training mean, not finding
 **The secondary endpoint illustrates why the null matters.** R1's balanced accuracy of 0.5504
 has a 95% confidence interval that excludes the 0.4919 baseline, which reads as a win. Its
 permutation p-value is 0.19. The permutation test is the correct arbiter: cross-validation
-folds share data, so the interval across repeats understates uncertainty, while the
+folds share data, so the interval across repeats understates uncertainty — the same mechanism by
+which a cross-validated score becomes optimistically biased once the same folds have informed a
+modelling choice [23] — while the
 permutation null is computed through the identical pipeline on shuffled labels. Reported as
 null. Component importances were not examined, because interpreting coefficient loadings
 under a null result would be fishing.
 
 **Interpretation.** With 140 clips against 30 to 110 dimensions and a 5.3 mph baseline spread,
 only a large effect is detectable, so absence of signal here cannot be distinguished from
-insufficient power. Piergiovanni and Ryoo [4] attempt the same prediction from the same
+insufficient power. Piergiovanni and Ryoo [5] attempt the same prediction from the same
 broadcast footage and describe it as extremely difficult, which is consistent. This endpoint
 should be revisited if the clip pool grows substantially, and is reported here as a
 pre-registered negative rather than omitted.
@@ -738,11 +741,11 @@ The implementation satisfies the technical feasibility requirement: baseball pos
 
 The modeling results separate cleanly into two tasks that earlier evaluations of this pipeline conflated.
 
-**Free-running reconstruction fails, and this should be stated as a negative result rather than described as "weak."** Negative R2 does not mean low accuracy; it means the model is worse than predicting the mean of the target window. No configuration reaches the −5.57 scored by a model with no dynamics at all, held-out accuracy degrades monotonically with model complexity, and the failure is not attributable to phase, to clip heterogeneity, or to the pose noise floor — each was tested and excluded in Sections 6.4 and 6.7.
+**Free-running reconstruction fails, and this should be stated as a negative result rather than described as "weak."** Negative R2 does not mean low accuracy; it means the model is worse than predicting the mean of the target window, the climatological reference in the skill-score sense [16]. No configuration reaches the −5.57 scored by a model with no dynamics at all, held-out accuracy degrades monotonically with model complexity, and the failure is not attributable to phase, to clip heterogeneity, or to the pose noise floor — each was tested and excluded in Sections 6.4 and 6.7.
 
 **Short-horizon prediction succeeds, and the pipeline does not exploit it.** A delay-embedded linear model achieves 0.39 skill over persistence on held-out one-step increments, positive under both aggregations, on a state whose increments are strongly autocorrelated (0.35 to 0.88). The dynamics are locally learnable. But Section 6.8 shows the fitted sparse equations retain 0 to 12 percent of the skill available in their own derivative targets, so the local structure is real and the pipeline discards it.
 
-These are consistent, not contradictory. Section 6.6 shows the mechanism directly: teacher-forcing the same model — supplying true history so no error compounds — recovers a sound map, while its autoregressive rollout diverges. The pipeline recovers local structure and loses it to error compounding over 40 frames.
+These are consistent, not contradictory. Section 6.6 shows the mechanism directly: teacher-forcing the same model — supplying true history so no error compounds — recovers a sound map, while its autoregressive rollout diverges. The pipeline recovers local structure and loses it to error compounding over 40 frames [20].
 
 The defensible claim is:
 
@@ -763,7 +766,7 @@ Two things this work must not claim. The results are not evidence of recovered g
 
 A further near-miss was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 6.6), and reporting only the pooled figure would have produced another spurious positive. The fourth row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
 
-The common structure is that all four involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising.
+The common structure is that all four involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising. Two established results underwrite it: a score expressed against a trivial reference forecast is interpretable where an absolute one is not [16], and a permutation null computed through the identical pipeline is the test that survives when the same folds have also informed a modelling choice [21], [23].
 
 ## 8. Reproducibility
 
@@ -988,7 +991,7 @@ Primary generated outputs:
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 6.9 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 6.6 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
 - The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
-- The chain ordering used in that test is a modelling judgement drawn from the biomechanics literature [1], not from the data. A different defensible ordering could change the result.
+- The chain ordering used in that test follows the throwing sequence described by Fleisig et al. [2] — stride, pelvis, upper torso, elbow, shoulder, wrist — rather than the data. A different defensible ordering could change the result.
 - The Section 6.10 null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 6.3); selected sparsity levels should not be read as evidence of a parsimonious true model.
 - Sections 6.1 and 6.3 report the operative pipeline's single train/test split, since that is what the pipeline produces. Sections 6.2, 6.8 and 6.9 now carry intervals — paired bootstrap over clips for the control comparison, resplits elsewhere — but the ensemble and second-order rows of Section 6.2 have not been re-scored with intervals, because that would mean refitting those configurations on every resample.
@@ -1050,80 +1053,62 @@ The practical value of the boundary is that it says what to build next, and what
 
 ## 12. Software
 
-Analysis code is Python 3.12. Numerical work uses NumPy [17] and SciPy [18]; Savitzky-Golay
+Analysis code is Python 3.12. Numerical work uses NumPy [24] and SciPy [25]; Savitzky-Golay
 smoothing and differentiation use `scipy.signal.savgol_filter`. Ridge regression,
-cross-validation, standardization, and R2 computation use scikit-learn [19]. Sparse model
-identification uses PySINDy 2.1.0 [9], [10]. Pose extraction uses MediaPipe [5]. Exact pinned
+cross-validation, standardization, and R2 computation use scikit-learn [26]. Sparse model
+identification uses PySINDy 2.1.0 [10], [11]. Pose extraction uses MediaPipe [6]. Exact pinned
 versions are in `requirements.txt`.
 
 ## References
 
-[1] G. S. Fleisig, J. R. Andrews, C. J. Dillman, and R. F. Escamilla, "Kinetics of baseball
-pitching with implications about injury mechanisms," *Amer. J. Sports Med.*, vol. 23, no. 2,
-pp. 233–239, Mar./Apr. 1995, doi: 10.1177/036354659502300218.
+[1] G. S. Fleisig, J. R. Andrews, C. J. Dillman, and R. F. Escamilla, "Kinetics of baseball pitching with implications about injury mechanisms," *Amer. J. Sports Med.*, vol. 23, no. 2, pp. 233–239, Mar./Apr. 1995, doi: 10.1177/036354659502300218.
 
-[2] R. M. Kanko, E. K. Laende, E. M. Davis, W. S. Selbie, and K. J. Deluzio, "Concurrent
-assessment of gait kinematics using marker-based and markerless motion capture," *J. Biomech.*,
-vol. 127, art. no. 110665, Oct. 2021, doi: 10.1016/j.jbiomech.2021.110665.
+[2] G. S. Fleisig, S. W. Barrentine, R. F. Escamilla, and J. R. Andrews, "Biomechanics of overhand throwing with implications for injuries," *Sports Med.*, vol. 21, no. 6, pp. 421–437, Jun. 1996, doi: 10.2165/00007256-199621060-00004.
 
-[3] C. Chen, R. Jafari, and N. Kehtarnavaz, "UTD-MHAD: A multimodal dataset for human action
-recognition utilizing a depth camera and a wearable inertial sensor," in *Proc. IEEE Int. Conf.
-Image Process. (ICIP)*, 2015, pp. 168–172, doi: 10.1109/ICIP.2015.7350781.
+[3] R. M. Kanko, E. K. Laende, E. M. Davis, W. S. Selbie, and K. J. Deluzio, "Concurrent assessment of gait kinematics using marker-based and markerless motion capture," *J. Biomech.*, vol. 127, art. no. 110665, Oct. 2021, doi: 10.1016/j.jbiomech.2021.110665.
 
-[4] A. J. Piergiovanni and M. S. Ryoo, "Fine-grained activity recognition in baseball videos,"
-in *Proc. IEEE/CVF Conf. Comput. Vis. Pattern Recognit. (CVPR) Workshops*, 2018. [Online].
-Available: https://arxiv.org/abs/1804.03247
+[4] C. Chen, R. Jafari, and N. Kehtarnavaz, "UTD-MHAD: A multimodal dataset for human action recognition utilizing a depth camera and a wearable inertial sensor," in *Proc. IEEE Int. Conf. Image Process. (ICIP)*, 2015, pp. 168–172, doi: 10.1109/ICIP.2015.7350781.
 
-[5] C. Lugaresi et al., "MediaPipe: A framework for building perception pipelines,"
-arXiv:1906.08172, 2019. [Online]. Available: https://arxiv.org/abs/1906.08172
+[5] A. J. Piergiovanni and M. S. Ryoo, "Fine-grained activity recognition in baseball videos," in *Proc. IEEE/CVF Conf. Comput. Vis. Pattern Recognit. (CVPR) Workshops*, 2018. [Online]. Available: https://arxiv.org/abs/1804.03247
 
-[6] V. Bazarevsky, I. Grishchenko, K. Raveendran, T. Zhu, F. Zhang, and M. Grundmann,
-"BlazePose: On-device real-time body pose tracking," arXiv:2006.10204, 2020. [Online].
-Available: https://arxiv.org/abs/2006.10204
+[6] C. Lugaresi et al., "MediaPipe: A framework for building perception pipelines," arXiv:1906.08172, 2019. [Online]. Available: https://arxiv.org/abs/1906.08172
 
-[7] A. Savitzky and M. J. E. Golay, "Smoothing and differentiation of data by simplified least
-squares procedures," *Anal. Chem.*, vol. 36, no. 8, pp. 1627–1639, 1964,
-doi: 10.1021/ac60214a047.
+[7] V. Bazarevsky, I. Grishchenko, K. Raveendran, T. Zhu, F. Zhang, and M. Grundmann, "BlazePose: On-device real-time body pose tracking," arXiv:2006.10204, 2020. [Online]. Available: https://arxiv.org/abs/2006.10204
 
-[8] S. L. Brunton, J. L. Proctor, and J. N. Kutz, "Discovering governing equations from data by
-sparse identification of nonlinear dynamical systems," *Proc. Nat. Acad. Sci.*, vol. 113,
-no. 15, pp. 3932–3937, Apr. 2016, doi: 10.1073/pnas.1517384113.
+[8] A. Savitzky and M. J. E. Golay, "Smoothing and differentiation of data by simplified least squares procedures," *Anal. Chem.*, vol. 36, no. 8, pp. 1627–1639, 1964, doi: 10.1021/ac60214a047.
 
-[9] B. M. de Silva, K. Champion, M. Quade, J.-C. Loiseau, J. N. Kutz, and S. L. Brunton,
-"PySINDy: A Python package for the sparse identification of nonlinear dynamical systems from
-data," *J. Open Source Softw.*, vol. 5, no. 49, art. no. 2104, 2020, doi: 10.21105/joss.02104.
+[9] S. L. Brunton, J. L. Proctor, and J. N. Kutz, "Discovering governing equations from data by sparse identification of nonlinear dynamical systems," *Proc. Nat. Acad. Sci.*, vol. 113, no. 15, pp. 3932–3937, Apr. 2016, doi: 10.1073/pnas.1517384113.
 
-[10] A. A. Kaptanoglu et al., "PySINDy: A comprehensive Python package for robust sparse system
-identification," *J. Open Source Softw.*, vol. 7, no. 69, art. no. 3994, 2022,
-doi: 10.21105/joss.03994.
+[10] B. M. de Silva, K. Champion, M. Quade, J.-C. Loiseau, J. N. Kutz, and S. L. Brunton, "PySINDy: A Python package for the sparse identification of nonlinear dynamical systems from data," *J. Open Source Softw.*, vol. 5, no. 49, art. no. 2104, 2020, doi: 10.21105/joss.02104.
 
-[11] D. A. Messenger and D. M. Bortz, "Weak SINDy: Galerkin-based data-driven model selection,"
-*Multiscale Model. Simul.*, vol. 19, no. 3, pp. 1474–1497, 2021, doi: 10.1137/20M1343166.
+[11] A. A. Kaptanoglu et al., "PySINDy: A comprehensive Python package for robust sparse system identification," *J. Open Source Softw.*, vol. 7, no. 69, art. no. 3994, 2022, doi: 10.21105/joss.03994.
 
-[12] D. A. Messenger and D. M. Bortz, "Weak SINDy for partial differential equations,"
-*J. Comput. Phys.*, vol. 443, art. no. 110525, 2021, doi: 10.1016/j.jcp.2021.110525.
+[12] D. A. Messenger and D. M. Bortz, "Weak SINDy: Galerkin-based data-driven model selection," *Multiscale Model. Simul.*, vol. 19, no. 3, pp. 1474–1497, 2021, doi: 10.1137/20M1343166.
 
-[13] U. Fasel, J. N. Kutz, B. W. Brunton, and S. L. Brunton, "Ensemble-SINDy: Robust sparse
-model discovery in the low-data, high-noise limit, with active learning and control," *Proc.
-Roy. Soc. A*, vol. 478, no. 2260, art. no. 20210904, 2022, doi: 10.1098/rspa.2021.0904.
+[13] D. A. Messenger and D. M. Bortz, "Weak SINDy for partial differential equations," *J. Comput. Phys.*, vol. 443, art. no. 110525, 2021, doi: 10.1016/j.jcp.2021.110525.
 
-[14] A. H. Murphy, "Skill scores based on the mean square error and their relationships to the
-correlation coefficient," *Mon. Weather Rev.*, vol. 116, no. 12, pp. 2417–2424, Dec. 1988,
-doi: 10.1175/1520-0493(1988)116<2417:SSBOTM>2.0.CO;2.
+[14] K. Champion, P. Zheng, A. Y. Aravkin, S. L. Brunton, and J. N. Kutz, "A unified sparse optimization framework to learn parsimonious physics-informed models from data," *IEEE Access*, vol. 8, pp. 169259–169271, 2020, doi: 10.1109/ACCESS.2020.3023625.
 
-[15] F. Takens, "Detecting strange attractors in turbulence," in *Dynamical Systems and
-Turbulence, Warwick 1980* (Lecture Notes in Mathematics, vol. 898), D. A. Rand and L.-S. Young,
-Eds. Berlin, Germany: Springer, 1981, pp. 366–381, doi: 10.1007/BFb0091924.
+[15] U. Fasel, J. N. Kutz, B. W. Brunton, and S. L. Brunton, "Ensemble-SINDy: Robust sparse model discovery in the low-data, high-noise limit, with active learning and control," *Proc. Roy. Soc. A*, vol. 478, no. 2260, art. no. 20210904, 2022, doi: 10.1098/rspa.2021.0904.
 
-[16] S. L. Brunton, B. W. Brunton, J. L. Proctor, E. Kaiser, and J. N. Kutz, "Chaos as an
-intermittently forced linear system," *Nature Commun.*, vol. 8, art. no. 19, 2017,
-doi: 10.1038/s41467-017-00030-8.
+[16] A. H. Murphy, "Skill scores based on the mean square error and their relationships to the correlation coefficient," *Mon. Weather Rev.*, vol. 116, no. 12, pp. 2417–2424, Dec. 1988, doi: 10.1175/1520-0493(1988)116<2417:SSBOTM>2.0.CO;2.
 
-[17] C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020,
-doi: 10.1038/s41586-020-2649-2.
+[17] B. Efron, "Bootstrap methods: Another look at the jackknife," *Ann. Statist.*, vol. 7, no. 1, pp. 1–26, 1979, doi: 10.1214/aos/1176344552.
 
-[18] P. Virtanen et al., "SciPy 1.0: Fundamental algorithms for scientific computing in Python,"
-*Nature Methods*, vol. 17, no. 3, pp. 261–272, 2020, doi: 10.1038/s41592-019-0686-2.
+[18] F. Takens, "Detecting strange attractors in turbulence," in *Dynamical Systems and Turbulence, Warwick 1980* (Lecture Notes in Mathematics, vol. 898), D. A. Rand and L.-S. Young, Eds. Berlin, Germany: Springer, 1981, pp. 366–381, doi: 10.1007/BFb0091924.
 
-[19] F. Pedregosa et al., "Scikit-learn: Machine learning in Python," *J. Mach. Learn. Res.*,
-vol. 12, pp. 2825–2830, 2011.
+[19] S. L. Brunton, B. W. Brunton, J. L. Proctor, E. Kaiser, and J. N. Kutz, "Chaos as an intermittently forced linear system," *Nature Commun.*, vol. 8, art. no. 19, 2017, doi: 10.1038/s41467-017-00030-8.
+
+[20] S. Ross and J. A. Bagnell, "Efficient reductions for imitation learning," in *Proc. 13th Int. Conf. Artif. Intell. Statist. (AISTATS)*, PMLR, 2010, pp. 661–668.
+
+[21] M. Ojala and G. C. Garriga, "Permutation tests for studying classifier performance," *J. Mach. Learn. Res.*, vol. 11, pp. 1833–1863, 2010.
+
+[22] P. J. Schmid, "Dynamic mode decomposition of numerical and experimental data," *J. Fluid Mech.*, vol. 656, pp. 5–28, Jul. 2010, doi: 10.1017/S0022112010001217.
+
+[23] S. Varma and R. Simon, "Bias in error estimation when using cross-validation for model selection," *BMC Bioinformatics*, vol. 7, art. no. 91, 2006, doi: 10.1186/1471-2105-7-91.
+
+[24] C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020, doi: 10.1038/s41586-020-2649-2.
+
+[25] P. Virtanen et al., "SciPy 1.0: Fundamental algorithms for scientific computing in Python," *Nature Methods*, vol. 17, no. 3, pp. 261–272, 2020, doi: 10.1038/s41592-019-0686-2.
+
+[26] F. Pedregosa et al., "Scikit-learn: Machine learning in Python," *J. Mach. Learn. Res.*, vol. 12, pp. 2825–2830, 2011.
