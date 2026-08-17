@@ -98,6 +98,21 @@ BIB: dict[str, str] = {
     "varma2006": 'S. Varma and R. Simon, "Bias in error estimation when using cross-validation '
         'for model selection," *BMC Bioinformatics*, vol. 7, art. no. 91, 2006, '
         "doi: 10.1186/1471-2105-7-91.",
+    "matsuo2001": 'T. Matsuo, G. S. Fleisig, R. F. Escamilla, S. W. Barrentine, and '
+        'J. R. Andrews, "Comparison of kinematic and temporal parameters between different pitch '
+        'velocity groups," *J. Appl. Biomech.*, vol. 17, no. 1, pp. 1–13, 2001.',
+    "hyndman2006": 'R. J. Hyndman and A. B. Koehler, "Another look at measures of forecast '
+        'accuracy," *Int. J. Forecasting*, vol. 22, no. 4, pp. 679–688, 2006, '
+        "doi: 10.1016/j.ijforecast.2006.03.001.",
+    "bergmeir2012": 'C. Bergmeir and J. M. Benítez, "On the use of cross-validation for time '
+        'series predictor evaluation," *Inf. Sci.*, vol. 191, pp. 192–213, 2012, '
+        "doi: 10.1016/j.ins.2011.12.028.",
+    "sun2019": 'K. Sun, B. Xiao, D. Liu, and J. Wang, "Deep high-resolution representation '
+        'learning for human pose estimation," in *Proc. IEEE/CVF Conf. Comput. Vis. Pattern '
+        "Recognit. (CVPR)*, 2019, pp. 5693–5703.",
+    "sandve2013": 'G. K. Sandve, A. Nekrutenko, J. Taylor, and E. Hovig, "Ten simple rules for '
+        'reproducible computational research," *PLoS Comput. Biol.*, vol. 9, no. 10, '
+        "art. no. e1003285, 2013, doi: 10.1371/journal.pcbi.1003285.",
     "harris2020": 'C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, '
         "pp. 357–362, 2020, doi: 10.1038/s41586-020-2649-2.",
     "virtanen2020": 'P. Virtanen et al., "SciPy 1.0: Fundamental algorithms for scientific '

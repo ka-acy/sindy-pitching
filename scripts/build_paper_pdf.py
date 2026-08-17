@@ -331,7 +331,14 @@ def preprocess(text: str, style: str) -> tuple[str, str]:
             raise SystemExit(f"placeholder {token!r} left in the source; fix before building")
 
 
-    leftover = sorted({c for c in out + abstract if ord(c) > 126 and c != "—"})
+    # Accented Latin letters are passed through rather than mapped away: pdflatex with utf8
+    # inputenc and T1 fontenc renders them, and an author's name must keep its diacritics.
+    # Latin-1 Supplement letters and Latin Extended-A cover the European names in the
+    # bibliography (Benítez, Loiseau, Stéfan, ...).
+    def _renderable(c: str) -> bool:
+        return c == "—" or 0x00C0 <= ord(c) <= 0x017F
+
+    leftover = sorted({c for c in out + abstract if ord(c) > 126 and not _renderable(c)})
     if leftover:
         raise SystemExit(
             "unmapped non-ASCII would break pdflatex: "
