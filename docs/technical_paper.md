@@ -7,20 +7,17 @@ sparse nonlinear dynamical models, together with an evaluation protocol in which
 score is paired with the no-model control for its own task. The workflow uses standardized
 skeletal pose, biomechanical feature extraction, and Sparse Identification of Nonlinear
 Dynamical Systems, applied to 140 MediaPipe-derived MLB pitching clips from a single broadcast
-view.
-
-The central result separates two tasks that prior evaluations conflated. Free-running
+view. The central result separates two tasks that prior evaluations conflated. Free-running
 reconstruction fails: no configuration outperforms a frozen zero-dynamics predictor, and accuracy
 degrades monotonically with model complexity. Short-horizon prediction succeeds: a delay-augmented
 state reaches 0.41 skill over persistence and the project's first positive derivative R2, from 32
 sparse terms, clearing an unfitted momentum control. Candidate causes of the failure are excluded
 one at a time — phase, clip heterogeneity, the pose noise floor, and the sparse estimator — leaving
-the state representation, which the delay result then confirms.
-
-Five intermediate results were false positives that survived only because a control or an
-aggregation was missing; each is reported with the check that overturned it, and that protocol is
-offered as a contribution alongside the pipeline. Release velocity and pitch type are not
-predictable from any of five representations, so no biomechanical claim is made.
+the state representation, which the delay result then confirms. Five intermediate results were
+false positives that survived only because a control or an aggregation was missing; each is
+reported with the check that overturned it, and that protocol is offered as a contribution
+alongside the pipeline. Release velocity and pitch type are not predictable from any of five
+representations, so no biomechanical claim is made.
 
 ## 1. Introduction
 
