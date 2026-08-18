@@ -53,7 +53,7 @@ TITLE = "Sparse Dynamical Modeling of Baseball Pitching Kinematics from Vision-D
 AUTHOR = (
     r"Alexander C. Yu, M.S. Student"
     r"\thanks{A. C. Yu is with the Department of Electrical and Computer Engineering, "
-    r"Rutgers University, New Brunswick, NJ, USA "
+    r"Rutgers University, New Brunswick, NJ 08901 USA "
     r"(e-mail: acy29@scarletmail.rutgers.edu).}"
 )
 
