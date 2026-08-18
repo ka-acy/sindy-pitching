@@ -50,7 +50,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT_ROOT / "docs" / "technical_paper.md"
 
 TITLE = "Sparse Dynamical Modeling of Baseball Pitching Kinematics from Vision-Derived Pose"
-AUTHOR = "Alex Yu"
+AUTHOR = (
+    r"Alexander C. Yu, M.S. Student"
+    r"\thanks{A. C. Yu is with the Department of Electrical and Computer Engineering, "
+    r"Rutgers University, New Brunswick, NJ 08901 USA "
+    r"(e-mail: acy29@scarletmail.rutgers.edu).}"
+)
+
 KEYWORDS = (
     "sparse identification of nonlinear dynamics, SINDy, human pose estimation, "
     "sports biomechanics, model evaluation, baseline controls, time-series forecasting"
