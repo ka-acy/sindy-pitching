@@ -318,6 +318,16 @@ def preprocess(text: str, style: str) -> tuple[str, str]:
     first, rest = text.split("\n", 1)
     if not first.startswith("# "):
         raise SystemExit(f"expected an H1 on line 1, got: {first[:60]!r}")
+    # A heading with no blank line before it is not a heading -- pandoc folds it into the
+    # preceding paragraph and the '###' renders as literal text in the PDF. This shipped once,
+    # so it fails the build now rather than being caught by eye.
+    lines = text.split("\n")
+    glued = [f"line {i + 1}: {l}" for i, l in enumerate(lines)
+             if l.startswith("#") and i > 0 and lines[i - 1].strip()]
+    if glued:
+        raise SystemExit("heading(s) with no blank line before them, which pandoc will render as "
+                         "body text:\n  " + "\n  ".join(glued))
+
     out = rest.lstrip("\n")
 
     abstract = ""

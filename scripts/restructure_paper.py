@@ -188,7 +188,7 @@ def main() -> None:
     out = [
         title, "\n\n", B["Abstract"].split("\n")[0], "\n\n", ABSTRACT, "\n",
         B["1"].replace("## 1. Introduction", "\n## 1. Introduction", 1).rstrip(), "\n",
-        B["1.1"].rstrip(), "\n",
+        "\n", B["1.1"].rstrip(), "\n",
         sub("1.2", "Research questions"), body_of(B["2"]).rstrip(), "\n",
         hdr("2", "Data"), body_of(B["4"]).rstrip(), "\n\n",
         sub("2.1", "Stage A validation data"), body_of(B["4.1"]).rstrip(), "\n",
