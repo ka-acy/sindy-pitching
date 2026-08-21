@@ -208,6 +208,17 @@ def to_ieee_structure(text: str) -> tuple[str, str]:
         text = re.sub(rf"(Sections [IVX]+(?:-[A-Z])? and ){re.escape(key)}\b",
                       rf"\g<1>{secmap[key]}", text)
 
+    # Lettered top-level sections are appendices. IEEEtran letters them itself once it has
+    # seen \appendices, so the manual letters come off like the Arabic ones and a raw-LaTeX
+    # block switches the numbering over at the first one. In-text "Appendix C" therefore needs
+    # no remapping: IEEEtran letters appendices in source order.
+    first_appendix = re.search(r"^## [A-Z]\. ", text, flags=re.M)
+    if first_appendix:
+        text = (text[: first_appendix.start()]
+                + "```{=latex}\n\\appendices\n```\n\n"
+                + text[first_appendix.start():])
+    text = re.sub(r"^## [A-Z]\. ", "## ", text, flags=re.M)
+
     # IEEEtran numbers sections itself.
     text = re.sub(r"^## \d+\. ", "## ", text, flags=re.M)
     text = re.sub(r"^### \d+\.\d+ ", "### ", text, flags=re.M)
@@ -460,6 +471,11 @@ def main() -> None:
                 r"\\begin\{figure\}(?P<b>((?!\\end\{figure\}).)*fig2_horizon((?!\\end\{figure\}).)*)\\end\{figure\}",
                 lambda m: "\\begin{figure*}[!t]" + m.group("b") + "\\end{figure*}",
                 tex, flags=re.S)
+            # References follow the appendices, so with \appendices in force an ordinary
+            # \section would letter them as one more appendix. IEEEtran sets the heading
+            # unnumbered anyway when the bibliography is its own environment.
+            if "\\appendices" in tex:
+                tex = tex.replace("\\section{References}", "\\section*{References}", 1)
             # IEEEtran wants Index Terms right after the abstract.
             tex = tex.replace(
                 "\\end{abstract}",

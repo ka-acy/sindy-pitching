@@ -2,28 +2,48 @@
 
 ## Abstract
 
-This paper develops a reproducible pipeline for converting vision-derived human motion into
-sparse nonlinear dynamical models, together with an evaluation protocol in which every reported
-score is paired with the no-model control for its own task. The workflow uses standardized
-skeletal pose, biomechanical feature extraction, and Sparse Identification of Nonlinear
-Dynamical Systems, applied to 140 MediaPipe-derived MLB pitching clips from a single broadcast
-view. The central result separates two tasks that prior evaluations conflated. Free-running
-reconstruction fails: no configuration outperforms a frozen zero-dynamics predictor, and accuracy
-degrades monotonically with model complexity. Short-horizon prediction succeeds: a delay-augmented
-state reaches 0.41 skill over persistence and the project's first positive derivative R2, from 32
-sparse terms, clearing an unfitted momentum control. Candidate causes of the failure are excluded
-one at a time — phase, clip heterogeneity, the pose noise floor, and the sparse estimator — leaving
-the state representation, which the delay result then confirms. Five intermediate results were
-false positives that survived only because a control or an aggregation was missing; each is
-reported with the check that overturned it, and that protocol is offered as a contribution
-alongside the pipeline. Release velocity and pitch type are not predictable from any of five
-representations, so no biomechanical claim is made.
+This paper reports two findings about sparse dynamical modeling of vision-derived baseball
+pitching motion, separated by the task each is scored on. The pipeline converts standardized
+skeletal pose into biomechanical features and fits sparse nonlinear dynamical models by Sparse
+Identification of Nonlinear Dynamical Systems, applied to 140 MediaPipe-derived MLB pitching
+clips from a single broadcast view. Free-running reconstruction fails: across first-order,
+second-order, ensemble and weak-form configurations, no fitted model outperforms a frozen
+zero-dynamics predictor on held-out clips, and accuracy degrades monotonically as model
+complexity rises. Short-horizon prediction succeeds on the same clips: a delay-augmented state
+reaches 0.39 skill over persistence, the same sparse estimator retains that skill with 30 terms
+while clearing an unfitted momentum control, and running the pipeline end to end on that
+configuration yields 0.41 skill and the project's first positive held-out derivative R2 of 0.44.
+Between the two, candidate causes of the failure are excluded one at a time — phase, clip
+heterogeneity, the pose noise floor and the sparse estimator — leaving the state representation,
+which the second finding confirms. Both are readable only because every score is paired with the
+no-model control for its own task and reported under two aggregations; five intermediate results
+in this project were false positives that survived only because a control or an aggregation was
+missing, and that protocol is offered as a contribution alongside the pipeline. The secondary
+analyses are null or negligible and are reported in appendices: cross-joint coupling accounts for
+under two percent of the delay model's skill, the proximal-to-distal kinetic chain does not
+survive its null, and release velocity and pitch type are not predictable from any of five
+pre-registered representations. No biomechanical claim is made.
 
 ## 1. Introduction
 
-Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale; the canonical kinetic descriptions of pitching mechanics were established this way [1], and the sequence they describe — stride, pelvis rotation, upper-torso rotation, elbow extension, shoulder internal rotation, wrist flexion — is the proximal-to-distal kinetic chain this paper tests against in Section 7 [2]. Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits. Markerless pose estimation has been validated against marker-based capture for gait, where joint-angle agreement is good for large sagittal motions and degrades for smaller out-of-plane rotations [3]; broadcast footage is a substantially harder case than the controlled multi-camera setting used in that comparison.
+Baseball pitching is a high-speed, multi-segment movement involving coordinated lower-body drive, trunk rotation, shoulder and elbow motion, stride mechanics, and rapid distal segment acceleration. Traditional biomechanical analysis often relies on laboratory motion capture, which produces high-quality trajectories but is expensive and difficult to scale; the canonical kinetic descriptions of pitching mechanics were established this way [1], and the sequence they describe — stride, pelvis rotation, upper-torso rotation, elbow extension, shoulder internal rotation, wrist flexion — is the proximal-to-distal kinetic chain this paper tests against in Appendix A [2]. Broadcast or locally segmented video is more accessible, but vision-derived pose introduces noise, camera-view bias, missing landmarks, and two-dimensional projection limits. Markerless pose estimation has been validated against marker-based capture for gait, where joint-angle agreement is good for large sagittal motions and degrades for smaller out-of-plane rotations [3]; broadcast footage is a substantially harder case than the controlled multi-camera setting used in that comparison.
 
 This project investigates whether a machine-vision and sparse-dynamics workflow can produce reproducible mathematical artifacts from baseball pitching motion. The goal is not to claim that the current dataset explains elite pitching mechanics. The goal is to establish a defensible technical pipeline that can ingest pose trajectories, condition them into stable feature matrices, estimate derivatives, and fit sparse dynamical models that can be compared across preprocessing and modeling configurations under a common evaluation protocol.
+
+This paper is organized around two findings that differ only in the task being scored, and the
+reader who wants the argument and nothing else can read Sections 4 through 7. Section 4 states
+the evaluation protocol, because no score below is interpretable without the no-model control
+for its own task. Section 5 reports the negative finding: free-running reconstruction of held-out
+pitching clips is not achievable with any configuration tried, and every fitted model is beaten
+by a predictor that assumes the pitcher does not move. Section 6 localizes that failure by
+excluding phase, clip heterogeneity, the pose noise floor and the sparse estimator in turn,
+leaving the state representation. Section 7 reports the positive finding: on the same clips a
+delay-augmented state supports short-horizon prediction, the pipeline's own sparse estimator
+recovers it, and that is the diagnosis of Section 6 confirmed. Section 8 records the five
+intermediate results the protocol overturned. The secondary analyses bear on neither finding and
+are reported in Appendices A through F, where the two that bound what may be claimed —
+cross-joint coupling with the kinetic chain, and the label-validated representation study — are
+Appendices A and B.
 
 ### 1.1 Related work
 
@@ -38,33 +58,44 @@ hybrid dynamics to centre-of-mass trajectories during walking and reports indivi
 interpretable models. Two differences shape what is achievable. That work uses laboratory motion
 capture, where the measurement noise is far below the signal, and it models a periodic gait cycle,
 where a low-dimensional template is a good description. Pitching is a single ballistic transient
-recorded here from broadcast video, and Sections 5 to 6.8 show both differences bite.
+recorded here from broadcast video, and Sections 5 and 6 show both differences bite.
 
 For the pose layer, markerless estimation has been validated against marker-based capture for
 gait, with good agreement on large sagittal motions and degradation on smaller out-of-plane
 rotations [3]; broadcast footage is a harder case again. On this dataset specifically,
 Piergiovanni and Ryoo [12] predict pitch speed and type directly from video and
-describe the task as extremely difficult, which is the prior against which Section 8 should be
+describe the task as extremely difficult, which is the prior against which Appendix B should be
 read. Laboratory studies do identify kinematic correlates of ball velocity [13] and of
 trunk-rotation timing [14], so the question this paper can address is not whether
 such correlates exist but whether they survive this medium.
 
-The delay-coordinate results in Sections 6 and 6.9 rest on Takens' embedding theorem
+The delay-coordinate results in Sections 6 and 7 rest on Takens' embedding theorem
 [15] and the practice of obtaining linear models of nonlinear dynamics from delay
 coordinates [16], with dynamic mode decomposition [17] as the spectral
-counterpart used in Section 8.
+counterpart used in Appendix B.
 
 ### 1.2 Research questions
 
-1. Can raw or vision-derived skeletal trajectories be converted into standardized baseball pitching feature matrices without manual per-clip intervention?
-2. Can derivative matrices and sparse coefficient matrices be regenerated reproducibly from those feature matrices?
-3. Are the fitted SINDy systems numerically stable on held-out baseball clips?
-4. Do any of the fitted systems outperform a no-dynamics control baseline on held-out free-running reconstruction?
-5. Do they outperform the corresponding no-model control on short-horizon prediction, and does the answer differ from RQ4?
-6. Is the limiting factor the model class, the state representation, the clip heterogeneity, or the pose noise floor?
+Two questions are primary, and they differ only in the task being scored:
+
+1. Do the fitted sparse systems outperform a no-dynamics control baseline on held-out
+   free-running reconstruction?
+2. Do they outperform the corresponding no-model control on short-horizon prediction, and does
+   the answer differ from question 1?
+
+One diagnostic question follows from the answers:
+
+3. Where the two answers differ, is the limiting factor the model class, the state
+   representation, the clip heterogeneity, or the pose noise floor?
+
+Three further questions are engineering prerequisites rather than findings, and are answered in
+passing: whether raw or vision-derived skeletal trajectories can be converted into standardized
+pitching feature matrices without manual per-clip intervention (Section 3), whether derivative
+and sparse coefficient matrices regenerate reproducibly from those feature matrices (Section 11),
+and whether the fitted systems are numerically stable on held-out clips (Section 5.1 — they are,
+and Section 4 explains why that is close to uninformative).
 
 ## 2. Data
-
 
 
 
@@ -80,7 +111,7 @@ The current pitching pool is **140 clips** (`data/baseball/splits/pitching_local
 
 Each clip additionally carries `pitch_type` and `pitch_speed_mph` labels in the pool CSV. These labels are not used by the dynamics pipeline described here; they are recorded for the label-validated representation study scoped in `docs/superpowers/specs/2026-06-23-representation-study-design.md`. Piergiovanni and Ryoo [12] attempt pitch-speed and pitch-type prediction from the same broadcast footage and describe it as extremely difficult, which is the relevant prior for that study.
 
-Generated arrays, processed features, models, and result summaries are intentionally excluded from version control by `.gitignore`. They are reproducible from the commands in Section 12.
+Generated arrays, processed features, models, and result summaries are intentionally excluded from version control by `.gitignore`. They are reproducible from the commands in Section 11.
 
 ## 3. Pipeline
 
@@ -90,7 +121,7 @@ estimation, model fitting, coefficient export — so its artifacts are infrastru
 than baseball findings. Stage B replaces only the input-pose layer with baseball-specific
 standardized pose and keeps everything downstream, which keeps video and pose-estimation issues
 separate from the modeling workflow. The pipeline is described here only as far as the results
-require; Section 12 gives the commands that regenerate every number.
+require; Section 11 gives the commands that regenerate every number.
 
 ### 3.1 Pose standardization
 
@@ -134,7 +165,7 @@ The state is chosen to cover the segments the throwing sequence runs through [2]
 
 Features are canonicalized by handedness: the configuration sets `default_handedness: R` and `infer_handedness_for_pitching: true`, so dominant/trail designations are resolved per clip rather than fixed to a body side. Angles are unwrapped (`angle_unwrap: true`).
 
-Event alignment is **disabled** in the operative configuration (`features.alignment.enabled: false`). An earlier configuration track aligned pitching clips around stride-ankle separation with lead-knee lift as a secondary signal; that track is retained as `config/preprocessing.baseball.aligned.yaml` but is not the operative default. Section A records why.
+Event alignment is **disabled** in the operative configuration (`features.alignment.enabled: false`). An earlier configuration track aligned pitching clips around stride-ankle separation with lead-knee lift as a secondary signal; that track is retained as `config/preprocessing.baseball.aligned.yaml` but is not the operative default. Appendix E records why.
 
 Derivatives are estimated with Savitzky-Golay differentiation using window length 9 and polynomial order 3.
 
@@ -149,7 +180,7 @@ Sparse models are fit by the SINDy method of Brunton et al. [4], which selects a
 - complexity penalty: 5e-05 per term
 - validation fraction for selection: 0.22 (24 of 111 training clips), seed 7
 
-The STLSQ threshold is **not fixed**; it is swept over `{0.1, 0.15, 0.2, 0.3, 0.5}` and selected by the sparsity-weighted score on the held-out selection split. For the operative first-order configuration the sweep selects **threshold 0.2**, yielding **26 equation terms**. Section 9 documents a degeneracy in this selection rule.
+The STLSQ threshold is **not fixed**; it is swept over `{0.1, 0.15, 0.2, 0.3, 0.5}` and selected by the sparsity-weighted score on the held-out selection split. For the operative first-order configuration the sweep selects **threshold 0.2**, yielding **26 equation terms**. Appendix C documents a degeneracy in this selection rule.
 
 A weak-form variant is available at `config/preprocessing.baseball.unaligned.handedness.weakform.yaml`, gated by `modeling.weak_form.enabled`. This uses the weak, integral formulation of Messenger and Bortz [5], [6], which replaces pointwise derivative estimates with integrals against test functions and is therefore substantially more robust to measurement noise — the motivation for trying it on broadcast-derived pose. It fits a `WeakPDELibrary` SINDy over stacked per-trajectory weak systems across all 111 training clips, then transplants the resulting coefficients into a plain polynomial-library SINDy so the standard predict and simulate paths apply unchanged. Because `WeakPDELibrary` places its test-function subdomains via the global NumPy RNG with no seed parameter, a single draw is neither reproducible nor low-variance; the implementation seeds locally (restoring prior RNG state) and stacks `n_seeds` independent subdomain draws. The operative weak-form settings are `K: 100`, `seed: 7`, `n_seeds: 5`.
 
@@ -161,7 +192,7 @@ The model outputs include equations, coefficient matrices, model-selection logs,
 
 This section is placed before the results because the protocol, not any single number, is
 what makes them interpretable. Five of this project's intermediate findings were false
-positives that only a control could catch, and Section 9 documents them.
+positives that only a control could catch, and Section 8 documents them.
 Held-out evaluation computes one-step derivative-prediction metrics and free-running reconstruction metrics. Reconstruction integrates the fitted system forward from the first observed state for `reconstruction_frames: 40` frames using the **RK4** integrator (`evaluation.integrator: rk4`; an `euler` option is retained and was marginally worse, core R2 −29.99 vs −29.56 on the first-order baseline).
 
 Two reconstruction metrics are reported:
@@ -190,7 +221,6 @@ where the target is `delta(t) = x(t+1) - x(t)`. Expressing accuracy against a na
 ## 5. Free-running reconstruction fails
 
 All results below were produced on 2026-08-12 against the same 140-clip pool (111 train / 29 test), RK4 integrator, and 40-frame reconstruction. Every number is backed by a CSV under `results/`; the consolidated table is `results/evaluation/baseball/model_comparison_2026-08-12.csv`.
-
 
 ### 5.1 The operative configuration
 
@@ -360,13 +390,13 @@ Per-feature signal and predictability across all 140 clips (`results/analysis/in
 
 : Per-feature signal scale, high-frequency residual, and increment autocorrelation across all 140 clips. The noise floor does not bound short-horizon prediction.
 
-Increment lag-1 autocorrelation ranges from 0.35 to 0.88, so increments are far from white and carry genuinely predictable structure; signal-to-noise is 2.2 to 4.4 throughout. **The noise floor does not explain the failures in Sections 5 and 6.6**, and short-horizon prediction is not capped by pose quality at this level. Higher-quality pose remains desirable for biomechanical interpretation, but it is not a precondition for the Section 7 result.
+Increment lag-1 autocorrelation ranges from 0.35 to 0.88, so increments are far from white and carry genuinely predictable structure; signal-to-noise is 2.2 to 4.4 throughout. **The noise floor does not explain the failures in Sections 5 and 6**, and short-horizon prediction is not capped by pose quality at this level. Higher-quality pose remains desirable for biomechanical interpretation, but it is not a precondition for the Section 7 result.
 
 The residual estimate is an upper bound on achievable precision, not a measurement of raw MediaPipe jitter: the features are already Savitzky-Golay smoothed, so this measures leftover high-frequency content in the modeled features. It is a floor on the floor.
 
 ### 6.3 The sparse estimator
 
-Section 7 established short-horizon structure using a delay-embedded ridge model, which is not what this pipeline produces. The question that determines how broadly the result can be claimed is whether the fitted STLSQ equations capture that structure. `src/preprocessing/evaluate_sindy_increment_skill.py` scores the fitted models on the identical task, with a `savgol_derivative_reference` row giving the ceiling any model fit to those derivative targets could reach.
+Section 7 establishes short-horizon structure using a delay-embedded ridge model, which is not what this pipeline produces. The question that determines how broadly the result can be claimed is whether the fitted STLSQ equations capture that structure. `src/preprocessing/evaluate_sindy_increment_skill.py` scores the fitted models on the identical task, with a `savgol_derivative_reference` row giving the ceiling any model fit to those derivative targets could reach.
 
 Uniform skill over persistence, 29 held-out clips:
 
@@ -430,7 +460,6 @@ One-step held-out prediction on the 29 test clips (`src/preprocessing/diagnose_i
 The `R2 (state)` column shows why every earlier evaluation missed it: 0.9777 against persistence's 0.9680. A 39 percent improvement in the predicted dynamics appears as a third-decimal difference once it is measured on the state, because the state metric is dominated by the near-identity component. This is a metric-selection failure, not a modeling one.
 
 The increment parameterization itself contributed nothing (0.2815 versus 0.2816). `RidgeCV` selects alpha of order 1e-4, so shrinkage is negligible, and the two targets span the same linear space. The argument that predicting the next state penalizes the near-identity map is correct in principle but empirically void at this regularization strength. Recording this because the reparameterization was predicted in advance to be the source of the improvement, and it was not — the improvement came entirely from changing the metric.
-
 
 ### 7.1 Sparse identification on a delay-augmented state
 
@@ -518,10 +547,376 @@ This configuration is offered as the recommended direction, not as a drop-in rep
 operative one. It answers a different question — one-step prediction rather than trajectory
 reconstruction — and Section 5 is the reason that is the right question to be asking.
 
-## 8. What the data does not support
+Two further analyses were run on this model and neither supports a claim. Cross-joint coupling
+is statistically detectable but accounts for about 1.8 percent of its skill, and the directional
+asymmetry that would evidence a proximal-to-distal kinetic chain does not survive across
+held-out splits. Release velocity and pitch type are not predictable from any of five
+pre-registered representations, none of which clears both its trivial baseline and a permutation
+null. Appendices A and B report both in full, and together they are why this paper makes no
+biomechanical claim.
 
+## 8. Evaluation lessons
 
-### 8.1 Cross-joint coupling and the kinetic chain
+**Methodological finding on evaluation.** Five intermediate results in this project were false positives. Four were caught by adding the no-model control for the specific task being scored; the fifth by a null the analysis had not originally applied per target:
+
+| apparent result | control that overturned it | outcome |
+|---|---|---|
+| weak-form core R2 −7.89, "3.7x better than baseline" | frozen zero-dynamics model, −5.57 | dissolved; the model had one non-bias term |
+| delay-embedding derivative R2 +0.69 | unfitted backward difference, +0.35 | roughly half was numerical differentiation |
+| teacher-forced one-step core R2 +0.76 | persistence, +0.85 | dissolved |
+| second-order short-horizon skill +0.89 | its own derivative reference, +0.89 | dissolved; velocity is an input column |
+| proximal-to-distal asymmetry +0.0011, four of five splits clearing a shift null | the same null applied per target, over 30 resplits | dissolved; interval [-0.0004, +0.0026], positive on 18 of 30 |
+
+: Intermediate results that did not survive the control or null for their task.
+
+A sixth near-miss was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 5), and reporting only the pooled figure would have produced another spurious positive. The second-order row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
+
+The common structure is that all five involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising. Two established results underwrite it: a score expressed against a trivial reference forecast is interpretable where an absolute one is not [23], and a permutation null computed through the identical pipeline is the test that survives when the same folds have also informed a modelling choice [27], [28].
+
+The two cases worth reading in detail are in the appendices. Appendix C is the selection rule
+that manufactured the weak-form result, retained because the repair is a change to the pipeline
+rather than to the write-up. Appendix D is the aggregation disagreement behind the sixth
+near-miss.
+
+## 9. Limitations and future work
+
+- The dataset is 140 clips from a single camera view, and may not cover enough athlete, view, and motion variability to support a global model.
+- MediaPipe-derived pose from broadcast or segmented video is noisier than marker-based motion capture.
+- Many clips are effectively 2D pose observations, which limits interpretation of out-of-plane motion.
+- Camera angle, zoom, and occlusion may change feature values independently of true biomechanics.
+- The polynomial libraries tried are low-degree; the second-order variants that add expressivity performed far worse on held-out reconstruction, so underfitting is not the binding constraint on the current data.
+- No configuration has demonstrated predictive validity on free-running reconstruction. The Section 7 result establishes short-horizon predictive structure only, and does not license claims about longer horizons.
+- The Section 7 skill figure was first obtained with a delay-embedded ridge model. Section 7.1 shows the project's own sparse estimator matches it on a delay-augmented state, so the result does belong to the method — but it belongs to that state, not to the operative configuration: Section 6.3 tests the operative fitted equations directly and finds they capture 0 percent (first-order) to 12 percent (second-order, acceleration) of the structure available in their own training targets. Short-horizon skill must be attributed to the delay state and not to the configuration Section 5 evaluates.
+- Skill over persistence measures prediction of increments. It is not a biomechanical validity measure, and 0.38 skill does not imply the fitted coefficients correspond to real biomechanical relationships.
+- The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
+- The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
+- The Section 7 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 5 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
+- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
+- The chain ordering used in that test follows the throwing sequence described by Fleisig et al. [2] — stride, pelvis, upper torso, elbow, shoulder, wrist — rather than the data. A different defensible ordering could change the result.
+- The Appendix B null cannot distinguish absence of label signal from insufficient power at 140 clips.
+- The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Appendix C); selected sparsity levels should not be read as evidence of a parsimonious true model.
+- Sections 5 and 6.3 report the operative pipeline's single train/test split, since that is what the pipeline produces. The control comparison in Section 5.2, the estimator comparison in Section 6.3 and the coupling test in Appendix A now carry intervals — paired bootstrap over clips for the first, resplits for the others — but the ensemble and second-order rows of Section 5 have not been re-scored with intervals, because that would mean refitting those configurations on every resample.
+- The system identifies sparse equations from measured features; it does not prove causal biomechanical mechanisms.
+
+Ordered by what would most change the paper's conclusions.
+
+1. **Decide whether the delay-augmented configuration becomes the operative default.** It is now
+   a first-class pipeline configuration (Section 7) and beats the current default on every
+   metric that discriminates: derivative R2 +0.4411 against −0.0184, skill +0.4071 against
+   −0.0041, and a non-degenerate candidate sweep. What holds the decision open is that it answers
+   a different question — one-step prediction rather than free-running reconstruction — so
+   switching means changing what the pipeline is for. That is an editorial call, not a technical
+   one.
+2. **Score the ensemble and second-order configurations against the frozen control with paired
+   intervals.** Section 5's two remaining rows are still single-split, because unlike the
+   others they need refitting per resample.
+3. **Extend the horizon sweep with longer clips** to test whether the crossover hinted at
+   H = 240 (Section 5, 13 clips) is real. It is the one place a fitted model came close to
+   the control.
+4. **Re-score the alignment track** under the current pool and the core-position metric
+   (Appendix E). It has never been evaluated on comparable footing, so the unaligned default
+   rests on a superseded comparison.
+5. **Add automated pose-quality metrics** and exclude low-confidence or heavily occluded clips,
+   which is the one untested route to raising the ceiling on the pitching data.
+6. **Batting needs a different pose model, and this is now measured rather than suspected.** The
+   batter is detected at all in only 78 percent of clips, and the best of seven selection rules
+   reaches 71 percent on the clips where he is, so roughly half of a batting dataset would be the
+   umpire or the pitcher. Upscaling the plate crop to 3x and 4x and loosening the detection
+   threshold do not fix it: on the clips where the batter is missed he remains missed, while the
+   umpire and catcher beside him are found, even though he is large, unoccluded and well lit at
+   that scale. The limit is therefore the detector on this subject and not the input resolution,
+   so the next step is a different pose model or an upstream person detector feeding
+   single-person crops — the top-down arrangement that high-resolution pose networks are built
+   around [29] — not another selection heuristic. Cropping the plate region, truncating
+   at camera-pan onset, and the labelled set for scoring rules are all worth keeping.
+
+Standing practice rather than tasks: report the no-model control for the specific task being
+scored, under both aggregations, and treat sign disagreement between them as a null result.
+
+Explicitly deprioritized on evidence gathered here: per-pitcher, per-pitch-type and per-phase
+conditioning (the per-clip oracle in Section 6 shows heterogeneity is not the constraint);
+non-autonomous or phase-augmented state vectors (no gain in three forms); further sparse-estimator
+substitution (dense and sparse intervals overlap, Section 6); and further representations for the
+label study: all five of the pre-registered set have now been evaluated and none clears either
+bar (Appendix B), including the delay-embedded spectrum that Section 6's finding would
+predict to be the most promising.
+
+## 10. Conclusion
+
+Free-running reconstruction of broadcast-derived pitching pose is not achievable with sparse
+dynamical models: every configuration tried is beaten by a predictor that assumes the pitcher does
+not move, and accuracy falls as model complexity rises. That failure is localized rather than
+merely reported. Phase, clip heterogeneity, the pose noise floor and the choice of sparse estimator
+were each excluded by direct test, leaving the state representation — and supplying two frames of
+history raises skill over persistence on the identical target from +0.01 to +0.41, which the
+pipeline now reproduces end to end from a configuration file.
+
+What the data does not support is equally definite. Release velocity and pitch type are not
+predictable from any of the five pre-registered representations, and the directional asymmetry that
+would evidence a proximal-to-distal kinetic chain does not survive its null. This paper therefore
+makes no biomechanical claim, and the discovered coefficients should not be read as mechanics.
+
+The evaluation protocol is the transferable part. Five intermediate results in this project were
+false positives: four were caught by adding the no-model control for the specific task being
+scored, the fifth by a null the analysis had not originally applied per target, and a sixth
+near-miss was an aggregation artifact. A metric whose absolute value is
+uninterpretable — R2 against a window mean when the target barely moves, or a sum of squares pooled
+across columns of unequal amplitude — will manufacture findings unless it ships with that control
+and both aggregations before any model is scored against it. On this evidence that discipline is
+not optional bookkeeping; it is the difference between a negative result and a wrong one.
+
+The defensible claim is:
+
+> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented
+> end-to-end, together with a state-comparable reconstruction metric and a control-paired
+> evaluation protocol in which every reported score is compared against the no-model baseline for
+> its own task. Under that protocol three findings separate. First, no fitted configuration —
+> first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running
+> reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades
+> monotonically with model complexity. Second, the data does carry short-horizon structure: a
+> delay-embedded linear model achieves 0.39 skill over persistence on held-out increment
+> prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88
+> rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that
+> structure as configured, but the cause is the state and not the estimator: the same sparse
+> estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30
+> terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. That state is
+> now a first-class pipeline configuration, and running the standard commands on it yields +0.4071
+> skill and the project's first positive derivative R2 (+0.4411).
+
+Two things this work must not claim. The results are not evidence of recovered governing laws of
+pitching mechanics: 26 coefficients that predict increments 39 percent better than persistence are
+not a biomechanical model, and the discovered equations have not been validated against any
+external quantity. And the weak-form configuration must not be presented as a successful model.
+
+This work contributes a reproducible software framework for sparse dynamical modeling of baseball pitching motion from standardized pose trajectories, together with an evaluation protocol for it. The engineering contribution is an end-to-end pipeline that transforms vision-derived skeletal motion into interpretable sparse-equation artifacts with documented preprocessing, feature extraction, model fitting, and evaluation, reproducible from scripted commands in the sense set out for computational research [30]: every number in Section 5 regenerates from a command in Section 11, and generated artifacts are excluded from version control rather than committed alongside them.
+
+The methodological contribution is the control-paired evaluation protocol: a state-comparable core-position reconstruction metric, a frozen-model control and a persistence control that make it interpretable, dual aggregation with sign disagreement treated as a null, and the discipline of matching each control to the specific task being scored. This protocol changed four conclusions in this project — three apparent positive results proved to be artifacts, and one real result had been invisible under the metric previously used (Sections 5.2, 6.3, 7 and 8). That track record is the strongest argument for the protocol.
+
+The empirical contribution is a characterized boundary rather than a flat negative, with the failure localized. Across first-order, second-order, ensemble, and weak-form configurations on 140 single-view broadcast-derived pitching clips, no fitted sparse model survives free-running reconstruction, and all are outperformed by a zero-dynamics baseline. Yet the same data supports short-horizon prediction: 0.39 skill over persistence on held-out increments, backed by increment autocorrelation of 0.35 to 0.88 and signal-to-noise of 2.2 to 4.4. Candidate explanations were tested and excluded one at a time — phase (no gain in three forms), clip heterogeneity (the per-clip oracle scores below a cross-clip delay model), the pose noise floor (SNR 2.2 to 4.4), and the sparse estimator (dense ridge and the best STLSQ agree to within 0.0003, Section 6). What remains is the state representation: an autonomous first-order state of joint positions does not determine its own next increment, and supplying two frames of history raises skill on the identical target from +0.0099 to +0.3874. That is a specific, testable diagnosis that points at a concrete change rather than at more tuning.
+
+The practical value of the boundary is that it says what to build next, and what not to. Short-horizon prediction is a task this data supports and is where a defensible biomechanical claim would have to start, but the sparse-fitting stage must be repaired before the pipeline can make that claim on its own artifacts. Free-running reconstruction of broadcast-derived pitching pose is not achievable with these methods and should not be the target. Better pose, larger pools, richer libraries, and per-pitcher conditioning are all secondary to the sparse fit, since none of them is where the measured loss occurs.
+
+## 11. Reproducibility
+
+All commands are run from the project root with the repository virtual environment. **The operative configuration must be passed explicitly** — the refresh script's default (`config/preprocessing.baseball.example.yaml`) does not reproduce Section 5.
+
+Install dependencies:
+
+```bash
+./.venv/bin/python -m pip install -r requirements.txt
+```
+
+Validate Python syntax:
+
+```bash
+./.venv/bin/python -m compileall src
+```
+
+Preview the operative baseball pipeline:
+
+```bash
+./.venv/bin/python src/preprocessing/refresh_baseball_pipeline.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml --dry-run
+```
+
+Reproduce Section 5 (operative first-order train + held-out evaluation):
+
+```bash
+./.venv/bin/python src/preprocessing/refresh_baseball_pipeline.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml
+```
+
+Reproduce the weak-form model of Section 5.2 and Appendix C. Note that fit and evaluation write to the same
+`results/equations/baseball/train/` and `results/evaluation/baseball/train_on_test/` paths for
+every configuration, so snapshot or re-run the baseline afterwards if both are needed:
+
+```bash
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
+  --split train --task-types pitching
+./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
+  --train-split train --eval-split test --task-types pitching
+```
+
+Reproduce the frozen control in Section 5:
+
+```bash
+./.venv/bin/python src/preprocessing/evaluate_static_baseline.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml --eval-split test
+```
+
+Reproduce the state-representation sweep in Section 6:
+
+```bash
+./.venv/bin/python src/preprocessing/diagnose_derivative_fit.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml
+```
+
+Reproduce Section 7, Section 6.2 and Appendix D (one-step skill, noise floor, horizon sweep):
+
+```bash
+./.venv/bin/python src/preprocessing/diagnose_increment_skill.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml
+```
+
+Reproduce the free-running control comparison in Section 5:
+
+```bash
+./.venv/bin/python src/preprocessing/evaluate_forecast_baselines.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml
+```
+
+Reproduce Section 6 (fitted SINDy equations on the short-horizon task):
+
+```bash
+./.venv/bin/python src/preprocessing/evaluate_sindy_increment_skill.py \
+  --config config/preprocessing.baseball.unaligned.handedness.yaml \
+  --model-root results/equations/baseball/train/pitching
+```
+
+For the second-order state, extract to an isolated feature subdir first so the 10-D features
+every other result depends on are not overwritten, then score the non-trivial task:
+
+```bash
+for split in train test; do
+  ./.venv/bin/python src/preprocessing/extract_baseball_features.py \
+    --config config/preprocessing.baseball.unaligned.second_order.isolated.yaml --split $split
+done
+./.venv/bin/python src/preprocessing/evaluate_sindy_increment_skill.py \
+  --config config/preprocessing.baseball.unaligned.second_order.isolated.yaml \
+  --model-root results/equations/baseball/train_second_order_2026-06-23/pitching \
+  --column-set rates
+```
+
+Reproduce Section 7 and Appendix A (sparse fit on a delay-augmented state, with the momentum controls
+and the coupling ablation):
+
+```bash
+./.venv/bin/python src/analysis/fit_delay_sindy.py
+```
+
+Reproduce Appendix B (label-validated representation study). This runs 200 permutations per
+representation per task and takes several minutes; `--quick` reduces it for a smoke run:
+
+```bash
+./.venv/bin/python src/analysis/run_representation_study.py
+```
+
+Reproduce the Section 6 estimator comparison:
+
+```bash
+./.venv/bin/python src/analysis/diagnose_sparse_fit_loss.py
+```
+
+Reproduce the Appendix A coupling test (five held-out splits, 60 null draws each):
+
+```bash
+./.venv/bin/python src/analysis/test_coupling_significance.py --n-null 60 --null-splits 5
+```
+
+Regenerate the figures. They are build artifacts under `results/`, which is excluded from
+version control, so this must run before the paper is built:
+
+```bash
+./.venv/bin/python src/analysis/make_paper_figures.py
+```
+
+Run the delay-augmented configuration end to end (Section 7):
+
+```bash
+for split in train test; do
+  ./.venv/bin/python src/preprocessing/extract_baseball_features.py \
+    --config config/preprocessing.baseball.delay.yaml --split $split
+done
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.delay.yaml --split train --task-types pitching
+./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py \
+  --config config/preprocessing.baseball.delay.yaml \
+  --train-split train --eval-split test --task-types pitching
+```
+
+Compare the old and repaired selection rules (Appendix C):
+
+```bash
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
+  --split train --task-types pitching
+./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
+  --config config/preprocessing.baseball.unaligned.handedness.weakform.gated.yaml \
+  --split train --task-types pitching
+```
+
+Reproduce the Section 5 paired control intervals (requires the per-clip control scores, which
+`evaluate_static_baseline.py` writes alongside its summary):
+
+```bash
+./.venv/bin/python src/preprocessing/evaluate_static_baseline.py
+./.venv/bin/python src/analysis/paired_control_intervals.py
+```
+
+Reproduce the Appendix F stability comparison:
+
+```bash
+./.venv/bin/python src/analysis/stabilize_delay_fit.py --n-splits 40
+```
+
+Reproduce the Appendix A directional asymmetry test:
+
+```bash
+./.venv/bin/python src/analysis/test_kinetic_chain_asymmetry.py --n-null 60 --null-splits 5
+```
+
+Compare multiple configurations in one run:
+
+```bash
+./.venv/bin/python src/preprocessing/compare_baseball_configs.py \
+  --configs config/preprocessing.baseball.unaligned.handedness.yaml \
+            config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
+  --output-csv results/evaluation/baseball/config_comparison_weakform.csv
+```
+
+Primary generated outputs:
+
+- `data/baseball/processed/train/features/manifest.csv`
+- `data/baseball/processed/test/features/manifest.csv`
+- `results/equations/baseball/train/summary.csv`
+- `results/equations/baseball/train/pitching/coefficients.csv`
+- `results/equations/baseball/train/pitching/equations.txt`
+- `results/equations/baseball/train/pitching/model_selection.csv`
+- `results/evaluation/baseball/train_on_test/summary.csv`
+- `results/evaluation/baseball/train_on_test/reconstruction_metrics.csv`
+- `results/evaluation/baseball/static_baseline/summary.csv`
+- `results/evaluation/baseball/model_comparison_2026-08-12.csv`
+- `results/evaluation/baseball/forecast_baselines/summary.csv`
+- `results/analysis/derivative_fit_diagnostics.csv`
+- `results/analysis/increment_skill/part_a_parameterization.csv`
+- `results/analysis/increment_skill/part_b_horizon_crossover.csv`
+- `results/analysis/increment_skill/part_c_noise_floor.csv`
+- `results/analysis/sindy_increment_skill.csv`
+- `results/analysis/sindy_increment_skill_second_order_rates.csv`
+- `results/analysis/sparse_fit_loss.csv`
+- `results/analysis/delay_sindy/skill_by_depth.csv`
+- `results/analysis/delay_sindy/equations.txt`
+- `results/analysis/coupling_significance/summary.json`
+- `results/analysis/delay_sindy/stability.csv`
+- `results/analysis/kinetic_chain_asymmetry/summary.json`
+- `results/analysis/paired_control_intervals.csv`
+- `results/evaluation/baseball/static_baseline/per_clip.csv`
+- `results/analysis/representation_study/comparison.csv`
+
+Analysis code is Python 3.12. Numerical work uses NumPy [31] and SciPy [32]; Savitzky-Golay
+smoothing and differentiation use `scipy.signal.savgol_filter`. Ridge regression,
+cross-validation, standardization, and R2 computation use scikit-learn [33]. Sparse model
+identification uses PySINDy 2.1.0 [9], [10]. Pose extraction uses MediaPipe [19]. Exact pinned
+versions are in `requirements.txt`.
+
+## A. Cross-joint coupling and the kinetic chain
+
+This appendix ablates the depth-3 delay model of Section 7 to ask whether its skill reflects
+coordination between joints, and in particular whether it evidences the proximal-to-distal
+kinetic chain. It does not, which is why Section 7 claims short-horizon predictive structure and
+nothing biomechanical.
 
 **Cross-joint coupling contributes, but weakly.** Restricting each equation to terms built
 from its own variable costs 0.0168 uniform and 0.0172 pooled (+0.3713 against +0.3881). The
@@ -622,9 +1017,9 @@ about twice shoulder-to-hip is a property of one coefficient pair in one fit, no
 effect recoverable from held-out prediction. This paper therefore makes no biomechanical claim
 about proximal-to-distal sequencing.
 
-### 8.2 Release velocity and pitch type
+## B. Release velocity and pitch type
 
-Every result above judges the pipeline by self-prediction of the motion. The clips also carry
+Every result in the body judges the pipeline by self-prediction of the motion. The clips also carry
 labels external to the pose — `pitch_speed_mph` (82.1 to 102.7, mean 91.3) and `pitch_type`
 — which the dynamics pipeline never uses. This section asks whether the representations
 encode structure that predicts them. A positive answer would be the first validation of this
@@ -690,26 +1085,7 @@ size, and here they do not. This endpoint
 should be revisited if the clip pool grows substantially, and is reported here as a
 pre-registered negative rather than omitted.
 
-## 9. Evaluation lessons
-
-**Methodological finding on evaluation.** Five intermediate results in this project were false positives. Four were caught by adding the no-model control for the specific task being scored; the fifth by a null the analysis had not originally applied per target:
-
-| apparent result | control that overturned it | outcome |
-|---|---|---|
-| weak-form core R2 −7.89, "3.7x better than baseline" | frozen zero-dynamics model, −5.57 | dissolved; the model had one non-bias term |
-| delay-embedding derivative R2 +0.69 | unfitted backward difference, +0.35 | roughly half was numerical differentiation |
-| teacher-forced one-step core R2 +0.76 | persistence, +0.85 | dissolved |
-| second-order short-horizon skill +0.89 | its own derivative reference, +0.89 | dissolved; velocity is an input column |
-| proximal-to-distal asymmetry +0.0011, four of five splits clearing a shift null | the same null applied per target, over 30 resplits | dissolved; interval [-0.0004, +0.0026], positive on 18 of 30 |
-
-: Intermediate results that did not survive the control or null for their task.
-
-A sixth near-miss was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 5), and reporting only the pooled figure would have produced another spurious positive. The second-order row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
-
-The common structure is that all five involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising. Two established results underwrite it: a score expressed against a trivial reference forecast is interpretable where an absolute one is not [23], and a permutation null computed through the identical pipeline is the test that survives when the same folds have also informed a modelling choice [27], [28].
-
-
-### 9.1 A selection rule that manufactured a finding
+## C. A selection rule that manufactured a finding
 
 An earlier internal comparison recorded the weak-form model as the best available on the fair metric (core R2 −7.89 versus −29.56) and recommended it as operative. Regenerating that run shows the result holds numerically but does not support that conclusion. The selected weak-form model has a **single non-bias term** across the entire 10-dimensional state:
 
@@ -772,354 +1148,17 @@ actually differ, and first-order candidates do not differ because none of them p
 — which is Section 6's conclusion arriving from a third direction. The rule was worth
 repairing, but no rule can make a sweep meaningful when every candidate is equally useless.
 
-### 9.2 When two aggregations disagree
+## D. When two aggregations disagree
 
 Pooled skill is positive at every horizon; uniform skill is negative at every horizon, and uniform core R2 favours persistence at every horizon. Per Section 4 this is reported as **no multi-step win**. The disagreement is fully explained by the amplitude spread across core columns: pooled sum-of-squares is decided by the large-amplitude angles, on which the model does help, while the small-amplitude columns on which it does badly count equally under uniform averaging.
 
 The H=240 row is the only sign of the crossover one would expect as persistence degrades — core R2 −1.87 against persistence −2.73 — but uniform skill is still negative there and only 13 clips are long enough to qualify. It is recorded as a direction to test with longer clips, not as a result.
 
-## 10. Limitations and future work
+## E. Preprocessing-track comparison
 
-- The dataset is 140 clips from a single camera view, and may not cover enough athlete, view, and motion variability to support a global model.
-- MediaPipe-derived pose from broadcast or segmented video is noisier than marker-based motion capture.
-- Many clips are effectively 2D pose observations, which limits interpretation of out-of-plane motion.
-- Camera angle, zoom, and occlusion may change feature values independently of true biomechanics.
-- The polynomial libraries tried are low-degree; the second-order variants that add expressivity performed far worse on held-out reconstruction, so underfitting is not the binding constraint on the current data.
-- No configuration has demonstrated predictive validity on free-running reconstruction. The Section 7 result establishes short-horizon predictive structure only, and does not license claims about longer horizons.
-- The Section 7 skill figure comes from a delay-embedded ridge model, not from a sparse SINDy fit. Section 6 tests the fitted equations directly and finds they capture 0 percent (first-order) to 12 percent (second-order, acceleration) of the structure available in their own training targets. The short-horizon result therefore characterizes the data, not the pipeline's sparse artifacts, and must not be attributed to SINDy.
-- Skill over persistence measures prediction of increments. It is not a biomechanical validity measure, and 0.38 skill does not imply the fitted coefficients correspond to real biomechanical relationships.
-- The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
-- The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
-- The Section 7 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 5 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
-- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
-- The chain ordering used in that test follows the throwing sequence described by Fleisig et al. [2] — stride, pelvis, upper torso, elbow, shoulder, wrist — rather than the data. A different defensible ordering could change the result.
-- The Section 8 null cannot distinguish absence of label signal from insufficient power at 140 clips.
-- The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Section 9); selected sparsity levels should not be read as evidence of a parsimonious true model.
-- Sections 5 and 6.3 report the operative pipeline's single train/test split, since that is what the pipeline produces. Sections 5, 6.8 and 6.9 now carry intervals — paired bootstrap over clips for the control comparison, resplits elsewhere — but the ensemble and second-order rows of Section 5 have not been re-scored with intervals, because that would mean refitting those configurations on every resample.
-- The system identifies sparse equations from measured features; it does not prove causal biomechanical mechanisms.
+An earlier aligned-versus-unaligned comparison (`results/evaluation/baseball/config_comparison.csv`) reported the unaligned track at 78 terms / whole-state R2 −4.8905 and the aligned track at 98 terms / whole-state R2 −2.4099. That comparison predates both the restored 140-clip pool and the core-position metric, and it ranked tracks on the whole-state score that Section 4 shows is not comparable across configurations. It is retained for history and is **not** the basis of the current operative choice. The alignment track has not been re-scored under the current pool and metric; doing so is listed in Section 9.
 
-Ordered by what would most change the paper's conclusions.
-
-1. **Decide whether the delay-augmented configuration becomes the operative default.** It is now
-   a first-class pipeline configuration (Section 7) and beats the current default on every
-   metric that discriminates: derivative R2 +0.4411 against −0.0184, skill +0.4071 against
-   −0.0041, and a non-degenerate candidate sweep. What holds the decision open is that it answers
-   a different question — one-step prediction rather than free-running reconstruction — so
-   switching means changing what the pipeline is for. That is an editorial call, not a technical
-   one.
-2. **Score the ensemble and second-order configurations against the frozen control with paired
-   intervals.** Section 5's two remaining rows are still single-split, because unlike the
-   others they need refitting per resample.
-3. **Extend the horizon sweep with longer clips** to test whether the crossover hinted at
-   H = 240 (Section 5, 13 clips) is real. It is the one place a fitted model came close to
-   the control.
-4. **Re-score the alignment track** under the current pool and the core-position metric
-   (Section A). It has never been evaluated on comparable footing, so the unaligned default
-   rests on a superseded comparison.
-5. **Add automated pose-quality metrics** and exclude low-confidence or heavily occluded clips,
-   which is the one untested route to raising the ceiling on the pitching data.
-6. **Batting needs a different pose model, and this is now measured rather than suspected.** The
-   batter is detected at all in only 78 percent of clips, and the best of seven selection rules
-   reaches 71 percent on the clips where he is, so roughly half of a batting dataset would be the
-   umpire or the pitcher. Upscaling the plate crop to 3x and 4x and loosening the detection
-   threshold do not fix it: on the clips where the batter is missed he remains missed, while the
-   umpire and catcher beside him are found, even though he is large, unoccluded and well lit at
-   that scale. The limit is therefore the detector on this subject and not the input resolution,
-   so the next step is a different pose model or an upstream person detector feeding
-   single-person crops — the top-down arrangement that high-resolution pose networks are built
-   around [29] — not another selection heuristic. Cropping the plate region, truncating
-   at camera-pan onset, and the labelled set for scoring rules are all worth keeping.
-
-Standing practice rather than tasks: report the no-model control for the specific task being
-scored, under both aggregations, and treat sign disagreement between them as a null result.
-
-Explicitly deprioritized on evidence gathered here: per-pitcher, per-pitch-type and per-phase
-conditioning (the per-clip oracle in Section 6 shows heterogeneity is not the constraint);
-non-autonomous or phase-augmented state vectors (no gain in three forms); further sparse-estimator
-substitution (dense and sparse intervals overlap, Section 6); and further representations for the
-label study: all five of the pre-registered set have now been evaluated and none clears either
-bar (Section 8), including the delay-embedded spectrum that Section 6's finding would
-predict to be the most promising.
-
-## 11. Conclusion
-
-Free-running reconstruction of broadcast-derived pitching pose is not achievable with sparse
-dynamical models: every configuration tried is beaten by a predictor that assumes the pitcher does
-not move, and accuracy falls as model complexity rises. That failure is localized rather than
-merely reported. Phase, clip heterogeneity, the pose noise floor and the choice of sparse estimator
-were each excluded by direct test, leaving the state representation — and supplying two frames of
-history raises skill over persistence on the identical target from +0.01 to +0.41, which the
-pipeline now reproduces end to end from a configuration file.
-
-What the data does not support is equally definite. Release velocity and pitch type are not
-predictable from any of the five pre-registered representations, and the directional asymmetry that
-would evidence a proximal-to-distal kinetic chain does not survive its null. This paper therefore
-makes no biomechanical claim, and the discovered coefficients should not be read as mechanics.
-
-The evaluation protocol is the transferable part. Five intermediate results in this project were
-false positives: four were caught by adding the no-model control for the specific task being
-scored, the fifth by a null the analysis had not originally applied per target, and a sixth
-near-miss was an aggregation artifact. A metric whose absolute value is
-uninterpretable — R2 against a window mean when the target barely moves, or a sum of squares pooled
-across columns of unequal amplitude — will manufacture findings unless it ships with that control
-and both aggregations before any model is scored against it. On this evidence that discipline is
-not optional bookkeeping; it is the difference between a negative result and a wrong one.
-
-The defensible claim is:
-
-> A reproducible sparse-dynamics pipeline for baseball pitching pose data was implemented
-> end-to-end, together with a state-comparable reconstruction metric and a control-paired
-> evaluation protocol in which every reported score is compared against the no-model baseline for
-> its own task. Under that protocol three findings separate. First, no fitted configuration —
-> first-order, second-order, ensemble, or weak-form — recovers dynamics that survive free-running
-> reconstruction; all are outperformed by a zero-dynamics baseline, and accuracy degrades
-> monotonically with model complexity. Second, the data does carry short-horizon structure: a
-> delay-embedded linear model achieves 0.39 skill over persistence on held-out increment
-> prediction, robust to error aggregation and backed by increment autocorrelation of 0.35 to 0.88
-> rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that
-> structure as configured, but the cause is the state and not the estimator: the same sparse
-> estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30
-> terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. That state is
-> now a first-class pipeline configuration, and running the standard commands on it yields +0.4071
-> skill and the project's first positive derivative R2 (+0.4411).
-
-Two things this work must not claim. The results are not evidence of recovered governing laws of
-pitching mechanics: 26 coefficients that predict increments 39 percent better than persistence are
-not a biomechanical model, and the discovered equations have not been validated against any
-external quantity. And the weak-form configuration must not be presented as a successful model.
-
-This work contributes a reproducible software framework for sparse dynamical modeling of baseball pitching motion from standardized pose trajectories, together with an evaluation protocol for it. The engineering contribution is an end-to-end pipeline that transforms vision-derived skeletal motion into interpretable sparse-equation artifacts with documented preprocessing, feature extraction, model fitting, and evaluation, reproducible from scripted commands in the sense set out for computational research [30]: every number in Section 5 regenerates from a command in Section 12, and generated artifacts are excluded from version control rather than committed alongside them.
-
-The methodological contribution is the control-paired evaluation protocol: a state-comparable core-position reconstruction metric, a frozen-model control and a persistence control that make it interpretable, dual aggregation with sign disagreement treated as a null, and the discipline of matching each control to the specific task being scored. This protocol changed four conclusions in this project — three apparent positive results proved to be artifacts, and one real result had been invisible under the metric previously used (Sections 9, 6.4, 6.5, 6.6). That track record is the strongest argument for the protocol.
-
-The empirical contribution is a characterized boundary rather than a flat negative, with the failure localized. Across first-order, second-order, ensemble, and weak-form configurations on 140 single-view broadcast-derived pitching clips, no fitted sparse model survives free-running reconstruction, and all are outperformed by a zero-dynamics baseline. Yet the same data supports short-horizon prediction: 0.39 skill over persistence on held-out increments, backed by increment autocorrelation of 0.35 to 0.88 and signal-to-noise of 2.2 to 4.4. Candidate explanations were tested and excluded one at a time — phase (no gain in three forms), clip heterogeneity (the per-clip oracle scores below a cross-clip delay model), the pose noise floor (SNR 2.2 to 4.4), and the sparse estimator (dense ridge and the best STLSQ agree to within 0.0003, Section 6). What remains is the state representation: an autonomous first-order state of joint positions does not determine its own next increment, and supplying two frames of history raises skill on the identical target from +0.0099 to +0.3874. That is a specific, testable diagnosis that points at a concrete change rather than at more tuning.
-
-The practical value of the boundary is that it says what to build next, and what not to. Short-horizon prediction is a task this data supports and is where a defensible biomechanical claim would have to start, but the sparse-fitting stage must be repaired before the pipeline can make that claim on its own artifacts. Free-running reconstruction of broadcast-derived pitching pose is not achievable with these methods and should not be the target. Better pose, larger pools, richer libraries, and per-pitcher conditioning are all secondary to the sparse fit, since none of them is where the measured loss occurs.
-
-## 12. Reproducibility
-
-All commands are run from the project root with the repository virtual environment. **The operative configuration must be passed explicitly** — the refresh script's default (`config/preprocessing.baseball.example.yaml`) does not reproduce Section 5.
-
-Install dependencies:
-
-```bash
-./.venv/bin/python -m pip install -r requirements.txt
-```
-
-Validate Python syntax:
-
-```bash
-./.venv/bin/python -m compileall src
-```
-
-Preview the operative baseball pipeline:
-
-```bash
-./.venv/bin/python src/preprocessing/refresh_baseball_pipeline.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml --dry-run
-```
-
-Reproduce Section 5 (operative first-order train + held-out evaluation):
-
-```bash
-./.venv/bin/python src/preprocessing/refresh_baseball_pipeline.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml
-```
-
-Reproduce Section 9 (weak-form model). Note that fit and evaluation write to the same
-`results/equations/baseball/train/` and `results/evaluation/baseball/train_on_test/` paths for
-every configuration, so snapshot or re-run the baseline afterwards if both are needed:
-
-```bash
-./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
-  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
-  --split train --task-types pitching
-./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py \
-  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
-  --train-split train --eval-split test --task-types pitching
-```
-
-Reproduce the frozen control in Section 5:
-
-```bash
-./.venv/bin/python src/preprocessing/evaluate_static_baseline.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml --eval-split test
-```
-
-Reproduce the state-representation sweep in Section 6:
-
-```bash
-./.venv/bin/python src/preprocessing/diagnose_derivative_fit.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml
-```
-
-Reproduce Sections 7, 6.6 and 6.7 (one-step skill, horizon sweep, noise floor):
-
-```bash
-./.venv/bin/python src/preprocessing/diagnose_increment_skill.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml
-```
-
-Reproduce the free-running control comparison in Section 5:
-
-```bash
-./.venv/bin/python src/preprocessing/evaluate_forecast_baselines.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml
-```
-
-Reproduce Section 6 (fitted SINDy equations on the short-horizon task):
-
-```bash
-./.venv/bin/python src/preprocessing/evaluate_sindy_increment_skill.py \
-  --config config/preprocessing.baseball.unaligned.handedness.yaml \
-  --model-root results/equations/baseball/train/pitching
-```
-
-For the second-order state, extract to an isolated feature subdir first so the 10-D features
-every other result depends on are not overwritten, then score the non-trivial task:
-
-```bash
-for split in train test; do
-  ./.venv/bin/python src/preprocessing/extract_baseball_features.py \
-    --config config/preprocessing.baseball.unaligned.second_order.isolated.yaml --split $split
-done
-./.venv/bin/python src/preprocessing/evaluate_sindy_increment_skill.py \
-  --config config/preprocessing.baseball.unaligned.second_order.isolated.yaml \
-  --model-root results/equations/baseball/train_second_order_2026-06-23/pitching \
-  --column-set rates
-```
-
-Reproduce Section 7 (sparse fit on a delay-augmented state, with the momentum controls
-and the coupling ablation):
-
-```bash
-./.venv/bin/python src/analysis/fit_delay_sindy.py
-```
-
-Reproduce Section 8 (label-validated representation study). This runs 200 permutations per
-representation per task and takes several minutes; `--quick` reduces it for a smoke run:
-
-```bash
-./.venv/bin/python src/analysis/run_representation_study.py
-```
-
-Reproduce the Section 6 estimator comparison:
-
-```bash
-./.venv/bin/python src/analysis/diagnose_sparse_fit_loss.py
-```
-
-Reproduce the Section 7 coupling test (five held-out splits, 60 null draws each):
-
-```bash
-./.venv/bin/python src/analysis/test_coupling_significance.py --n-null 60 --null-splits 5
-```
-
-Regenerate the figures. They are build artifacts under `results/`, which is excluded from
-version control, so this must run before the paper is built:
-
-```bash
-./.venv/bin/python src/analysis/make_paper_figures.py
-```
-
-Run the delay-augmented configuration end to end (Section 7):
-
-```bash
-for split in train test; do
-  ./.venv/bin/python src/preprocessing/extract_baseball_features.py \
-    --config config/preprocessing.baseball.delay.yaml --split $split
-done
-./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
-  --config config/preprocessing.baseball.delay.yaml --split train --task-types pitching
-./.venv/bin/python src/preprocessing/evaluate_baseball_sindy.py \
-  --config config/preprocessing.baseball.delay.yaml \
-  --train-split train --eval-split test --task-types pitching
-```
-
-Compare the old and repaired selection rules (Section 9):
-
-```bash
-./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
-  --config config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
-  --split train --task-types pitching
-./.venv/bin/python src/preprocessing/fit_baseball_sindy.py \
-  --config config/preprocessing.baseball.unaligned.handedness.weakform.gated.yaml \
-  --split train --task-types pitching
-```
-
-Reproduce the Section 5 paired control intervals (requires the per-clip control scores, which
-`evaluate_static_baseline.py` writes alongside its summary):
-
-```bash
-./.venv/bin/python src/preprocessing/evaluate_static_baseline.py
-./.venv/bin/python src/analysis/paired_control_intervals.py
-```
-
-Reproduce the Section 7 stability comparison:
-
-```bash
-./.venv/bin/python src/analysis/stabilize_delay_fit.py --n-splits 40
-```
-
-Reproduce the Section 7 directional asymmetry test:
-
-```bash
-./.venv/bin/python src/analysis/test_kinetic_chain_asymmetry.py --n-null 60 --null-splits 5
-```
-
-Compare multiple configurations in one run:
-
-```bash
-./.venv/bin/python src/preprocessing/compare_baseball_configs.py \
-  --configs config/preprocessing.baseball.unaligned.handedness.yaml \
-            config/preprocessing.baseball.unaligned.handedness.weakform.yaml \
-  --output-csv results/evaluation/baseball/config_comparison_weakform.csv
-```
-
-Primary generated outputs:
-
-- `data/baseball/processed/train/features/manifest.csv`
-- `data/baseball/processed/test/features/manifest.csv`
-- `results/equations/baseball/train/summary.csv`
-- `results/equations/baseball/train/pitching/coefficients.csv`
-- `results/equations/baseball/train/pitching/equations.txt`
-- `results/equations/baseball/train/pitching/model_selection.csv`
-- `results/evaluation/baseball/train_on_test/summary.csv`
-- `results/evaluation/baseball/train_on_test/reconstruction_metrics.csv`
-- `results/evaluation/baseball/static_baseline/summary.csv`
-- `results/evaluation/baseball/model_comparison_2026-08-12.csv`
-- `results/evaluation/baseball/forecast_baselines/summary.csv`
-- `results/analysis/derivative_fit_diagnostics.csv`
-- `results/analysis/increment_skill/part_a_parameterization.csv`
-- `results/analysis/increment_skill/part_b_horizon_crossover.csv`
-- `results/analysis/increment_skill/part_c_noise_floor.csv`
-- `results/analysis/sindy_increment_skill.csv`
-- `results/analysis/sindy_increment_skill_second_order_rates.csv`
-- `results/analysis/sparse_fit_loss.csv`
-- `results/analysis/delay_sindy/skill_by_depth.csv`
-- `results/analysis/delay_sindy/equations.txt`
-- `results/analysis/coupling_significance/summary.json`
-- `results/analysis/delay_sindy/stability.csv`
-- `results/analysis/kinetic_chain_asymmetry/summary.json`
-- `results/analysis/paired_control_intervals.csv`
-- `results/evaluation/baseball/static_baseline/per_clip.csv`
-- `results/analysis/representation_study/comparison.csv`
-
-Analysis code is Python 3.12. Numerical work uses NumPy [31] and SciPy [32]; Savitzky-Golay
-smoothing and differentiation use `scipy.signal.savgol_filter`. Ridge regression,
-cross-validation, standardization, and R2 computation use scikit-learn [33]. Sparse model
-identification uses PySINDy 2.1.0 [9], [10]. Pose extraction uses MediaPipe [19]. Exact pinned
-versions are in `requirements.txt`.
-
-## A. Appendix: superseded and auxiliary results
-
-Retained for provenance. Nothing here supports a claim in the body.
-
-### A.1 Preprocessing-track comparison
-
-An earlier aligned-versus-unaligned comparison (`results/evaluation/baseball/config_comparison.csv`) reported the unaligned track at 78 terms / whole-state R2 −4.8905 and the aligned track at 98 terms / whole-state R2 −2.4099. That comparison predates both the restored 140-clip pool and the core-position metric, and it ranked tracks on the whole-state score that Section 4 shows is not comparable across configurations. It is retained for history and is **not** the basis of the current operative choice. The alignment track has not been re-scored under the current pool and metric; doing so is listed in Section 10.
-
-### A.2 Delay-model stability
+## F. Delay-model stability
 
 **Instability, diagnosed and fixed.** The unrestricted 30-column fit diverged on 2 of 40 random
 clip-level splits, producing predictions of order 1e4 against true increments of order 1. On a
@@ -1157,8 +1196,8 @@ inside the confidence interval, and the model stays interpretable. Nothing is lo
 it, since the two rotations that define it remain in the design and it is not a target column.
 
 The delay model is therefore stable at 27 design dimensions and about 32 terms. The coupling
-analysis in Section 8.1 predates this fix, which is why it had to exclude diverging splits by hand;
-repeating it on the stabilized design is listed in Section 10.
+analysis in Appendix A predates this fix, which is why it had to exclude diverging splits by hand;
+repeating it on the stabilized design is listed in Section 9.
 
 ## References
 
