@@ -3,26 +3,21 @@
 ## Abstract
 
 This paper reports two findings about sparse dynamical modeling of vision-derived baseball
-pitching motion, separated by the task each is scored on. The pipeline converts standardized
-skeletal pose into biomechanical features and fits sparse nonlinear dynamical models by Sparse
-Identification of Nonlinear Dynamical Systems, applied to 140 MediaPipe-derived MLB pitching
-clips from a single broadcast view. Free-running reconstruction fails: across first-order,
-second-order, ensemble and weak-form configurations, no fitted model outperforms a frozen
-zero-dynamics predictor on held-out clips, and accuracy degrades monotonically as model
-complexity rises. Short-horizon prediction succeeds on the same clips: a delay-augmented state
-reaches 0.39 skill over persistence, the same sparse estimator retains that skill with 30 terms
-while clearing an unfitted momentum control, and running the pipeline end to end on that
-configuration yields 0.41 skill and the project's first positive held-out derivative R2 of 0.44.
-Between the two, candidate causes of the failure are excluded one at a time — phase, clip
-heterogeneity, the pose noise floor and the sparse estimator — leaving the state representation,
-which the second finding confirms. Both are readable only because every score is paired with the
-no-model control for its own task and reported under two aggregations; five intermediate results
-in this project were false positives that survived only because a control or an aggregation was
-missing, and that protocol is offered as a contribution alongside the pipeline. The secondary
-analyses are null or negligible and are reported in appendices: cross-joint coupling accounts for
-under two percent of the delay model's skill, the proximal-to-distal kinetic chain does not
-survive its null, and release velocity and pitch type are not predictable from any of five
-pre-registered representations. No biomechanical claim is made.
+pitching motion, separated by the task each is scored on. Biomechanical features from 140
+MediaPipe-derived MLB pitching clips, all one broadcast view, are fitted by sparse identification
+of nonlinear dynamical systems. Free-running reconstruction fails: no configuration — first-order,
+second-order, ensemble or weak-form — outperforms a frozen zero-dynamics predictor on held-out
+clips, and accuracy degrades monotonically with model complexity. Short-horizon prediction
+succeeds on the same clips: a delay-augmented state reaches 0.39 skill over persistence, the
+sparse estimator retains it with 30 terms while clearing an unfitted momentum control, and the
+pipeline run end to end yields 0.41 skill and its first positive held-out derivative R2, 0.44.
+Candidate causes of the failure are excluded one at a time — phase, clip heterogeneity, the pose
+noise floor, the sparse estimator — leaving the state representation, which the second finding
+confirms. Both are readable only because every score is paired with the no-model control for its
+own task: five intermediate results here were false positives concealed by a missing control or
+aggregation. That protocol is a contribution alongside the pipeline. Secondary analyses of joint
+coupling, the kinetic chain, and release velocity and pitch type are null or negligible, so no
+biomechanical claim is made.
 
 ## 1. Introduction
 
@@ -548,7 +543,8 @@ operative one. It answers a different question — one-step prediction rather th
 reconstruction — and Section 5 is the reason that is the right question to be asking.
 
 Two further analyses were run on this model and neither supports a claim. Cross-joint coupling
-is statistically detectable but accounts for about 1.8 percent of its skill, and the directional
+is statistically detectable but averages about 1.8 percent of its skill across resplits,
+and the directional
 asymmetry that would evidence a proximal-to-distal kinetic chain does not survive across
 held-out splits. Release velocity and pitch type are not predictable from any of five
 pre-registered representations, none of which clears both its trivial baseline and a permutation
@@ -591,7 +587,7 @@ near-miss.
 - The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 7 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 5 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
-- The cross-joint coupling gain is statistically detectable but is about 1.8 percent of the delay model's skill, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
+- The cross-joint coupling gain is statistically detectable but averages about 1.8 percent of the delay model's skill across resplits, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
 - The chain ordering used in that test follows the throwing sequence described by Fleisig et al. [2] — stride, pelvis, upper torso, elbow, shoulder, wrist — rather than the data. A different defensible ordering could change the result.
 - The Appendix B null cannot distinguish absence of label signal from insufficient power at 140 clips.
 - The `sparsity_weighted_r2` selection rule degenerates to a term-count minimizer when candidate accuracies are indistinguishable (Appendix C); selected sparsity levels should not be read as evidence of a parsimonious true model.
@@ -920,8 +916,9 @@ nothing biomechanical.
 
 **Cross-joint coupling contributes, but weakly.** Restricting each equation to terms built
 from its own variable costs 0.0168 uniform and 0.0172 pooled (+0.3713 against +0.3881). The
-coupling is therefore real and consistent across both aggregations, but it accounts for
-roughly four percent of the model's skill. The discovered structure is suggestive:
+coupling is therefore real and consistent across both aggregations, but on this split it
+accounts for roughly four percent of the model's skill, and less than half of that once
+the gain is averaged over resplits below. The discovered structure is suggestive:
 
 ```
 delta(shoulder_rotation_angle) = +0.373*d1(shoulder_rotation_angle) +0.185*d1(hip_rotation_angle)
@@ -966,8 +963,9 @@ confidence interval of [+0.0055, +0.0087] and is positive on 29 of 30. Against n
 with standard deviations of 0.0001 to 0.0003, the four positive splits sit many standard
 deviations above chance. The cross-joint terms therefore do carry information.
 
-**What that does and does not license.** The effect is about **1.8 percent** of the model's
-0.389 total skill, and one split in five shows none of it, so almost all of what this model does
+**What that does and does not license.** Averaged over resplits the effect is about **1.8
+percent** of the model's 0.389 total skill, less than half what the single split above
+showed, and one split in five shows none of it, so almost all of what this model does
 remains each joint's own momentum. More importantly, detecting that shoulder motion is predicted
 in part by hip motion is not a discovery: the hips and shoulders are mechanically linked through
 the trunk, and any whole-body coordination would produce it. The proximal-to-distal kinetic chain

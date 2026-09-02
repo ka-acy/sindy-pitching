@@ -7,8 +7,8 @@ get into a paper, so it is done here instead.
 
 The markdown carries `{{key}}` placeholders. This script walks the body in order, assigns each
 key a number the first time it appears, rewrites the placeholders as `[n]`, and regenerates the
-References section in that order. Running it on a paper with no placeholders left is a no-op,
-so it is safe to re-run.
+References section in that order. A paper with no placeholders left is already rendered, so
+the script stops before touching it: re-running is safe.
 
 Keys that appear in the bibliography but are never cited, and keys cited but absent from the
 bibliography, are both reported as errors rather than silently dropped or numbered.
@@ -141,6 +141,14 @@ def main() -> None:
         raise SystemExit("no References section found")
 
     keys = re.findall(r"\{\{([A-Za-z0-9_]+)\}\}", head)
+    # With no placeholders left there is nothing to number, and the References section below is
+    # already the rendered result of an earlier run. Falling through would regenerate it from an
+    # empty citation order and silently delete the whole bibliography, which is what happened
+    # once. Re-running this script is only a no-op if it stops here.
+    if not keys:
+        print("no {{key}} placeholders in the body; nothing to renumber")
+        return
+
     unknown = sorted(set(keys) - set(BIB))
     if unknown:
         raise SystemExit("cited keys missing from the bibliography: " + ", ".join(unknown))
