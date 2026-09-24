@@ -90,9 +90,12 @@ def fig1_skill_by_depth(out: Path) -> None:
 
     # Reference levels, labelled at the left so they never compete with the legend.
     ax.axhline(0.0, color=MUTED, lw=1.0)
-    ax.axhline(0.1311, color=MUTED, lw=1.0, ls=":")
+    ax.axhline(0.1265, color=MUTED, lw=1.0, ls=":")
+    ax.axhline(0.3356, color=MUTED, lw=1.0, ls=":")
     ax.text(depths[0] - 0.05, 0.012, "persistence", color=INK_2, fontsize=6.5, va="bottom")
-    ax.text(depths[0] - 0.05, 0.143, "momentum control", color=INK_2, fontsize=6.5, va="bottom")
+    ax.text(depths[0] - 0.05, 0.138, "momentum, unfitted", color=INK_2, fontsize=6.5, va="bottom")
+    ax.text(depths[0] - 0.05, 0.325, "damped momentum,\n8 coefficients", color=INK_2, fontsize=6.5,
+            va="top")
 
     # The two estimators coincide, which is the finding rather than a plotting accident.
     # Dense ridge is drawn as a wide pale band so the overlap is legible as overlap.
@@ -105,7 +108,7 @@ def fig1_skill_by_depth(out: Path) -> None:
                 xy=(4, sparse[3]), xytext=(3.0, 0.245), color=INK_2, fontsize=6.8,
                 arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.7))
     ax.annotate("one frame of history:\n+0.01 to +0.37", xy=(2, sparse[1]),
-                xytext=(1.25, 0.30), color=BLUE, fontsize=6.8,
+                xytext=(2.15, 0.17), color=BLUE, fontsize=6.8,
                 arrowprops=dict(arrowstyle="->", color=BLUE, lw=0.7))
 
     ax.set_xlabel("history depth (frames of past increments)")

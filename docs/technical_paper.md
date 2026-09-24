@@ -9,7 +9,7 @@ of nonlinear dynamical systems. Free-running reconstruction fails: no configurat
 second-order, ensemble or weak-form — outperforms a frozen zero-dynamics predictor on held-out
 clips, and accuracy degrades monotonically with model complexity. Short-horizon prediction
 succeeds on the same clips: a delay-augmented state reaches 0.39 skill over persistence, the
-sparse estimator retains it with 30 terms while clearing an unfitted momentum control, and the
+sparse estimator retains it with 30 terms, though 8-coefficient damped momentum reaches 0.34, and the
 pipeline run end to end yields 0.41 skill and its first positive held-out derivative R2, 0.44.
 Candidate causes of the failure are excluded one at a time — phase, clip heterogeneity, the pose
 noise floor, the sparse estimator — leaving the state representation, which the second finding
@@ -474,35 +474,47 @@ assumed (`src/analysis/fit_delay_sindy.py`, `results/analysis/delay_sindy/`).
 
 : Sparse skill over persistence by history depth. Almost all of the gain arrives with the first frame of history, and the curve saturates by depth 3.
 
-![Skill over persistence against history depth. The dense-ridge band and the sparse fit coincide: 32 terms match 240 coefficients. Almost the entire gain arrives with the first frame of history.](results/figures/fig1_skill_by_depth.pdf){width=100%}
+![Skill over persistence against history depth. The dense-ridge band and the sparse fit coincide: 32 terms match 240 coefficients. Almost the entire gain arrives with the first frame of history. Dotted lines are the unfitted 2-frame momentum control and 8-coefficient damped momentum.](results/figures/fig1_skill_by_depth.pdf){width=100%}
 
 **Sparse identification retains essentially all of the available skill.** At depth 3 a
 30-term sparse model scores +0.3881 uniform against dense ridge's +0.3877 with 240
 coefficients — the sparse fit is not worse, and it is an order of magnitude smaller. This is
 the first result in this project that belongs to the pipeline's own method rather than to a
-baseline.
+baseline, though the controls below show how much of it a far simpler model also reaches.
 
-**It also beats the unfitted momentum control, which is the bar that matters here.** Every
-discovered equation is dominated by the target's own previous increment, so the relevant
-control is not persistence but momentum — a joint continuing to move as it was moving,
-which requires no fitting at all:
+**Most of that skill is local motion, not identified dynamics.** Every discovered equation is
+dominated by the target's own previous increment, so the relevant control is not persistence but
+a local motion model — a joint continuing to move as it was moving. Two families are scored on one
+shared row set (`control:` rows in `skill_by_depth.csv`): unfitted least-squares polynomial
+extrapolation over the last W frames, and a per-joint autoregression on that joint's own past
+increments, fitted on train, with no levels and no coupling.
 
-| model | terms | skill (pooled) | skill (uniform) |
+| model | params | skill (pooled) | skill (uniform) |
 |---|---:|---:|---:|
 | persistence, zero increment | 0 | 0.0000 | 0.0000 |
-| momentum, `delta_hat(t) = delta(t-1)` | 0 | -0.0643 | +0.1311 |
-| momentum, constant acceleration | 0 | -1.5219 | -0.9712 |
-| sparse STLSQ, self terms only | 20 | +0.2645 | +0.3713 |
-| sparse STLSQ, all terms | 30 | **+0.2817** | **+0.3881** |
+| local linear, 2 frames: `delta_hat(t) = delta(t-1)` | 0 | -0.0729 | +0.1265 |
+| local linear, least squares over 3 to 9 frames | 0 | -0.28 to -2.41 | -0.10 to -2.78 |
+| local quadratic, 3 frames: constant acceleration | 0 | -1.5447 | -0.9875 |
+| local quadratic, least squares, W=4 (train-selected) | 0 | -1.0642 | -0.6333 |
+| per-joint AR(1): damped momentum | 8 | +0.2242 | +0.3356 |
+| per-joint AR(2) | 16 | +0.2420 | +0.3558 |
+| per-joint AR(3) | 24 | +0.2449 | +0.3595 |
+| sparse STLSQ, all terms | 31 | **+0.2781** | **+0.3858** |
 
-: Fitted sparse models against unfitted momentum controls, depth 3, threshold 0.05. The fit adds 0.257 uniform skill over the strongest unfitted control, so the result is not merely momentum.
+: Local motion controls against the sparse fit, depth 3, threshold 0.05, all on the same 6,070 held-out rows (t ≥ 8, so every window is available). Figures differ slightly from the depth table, which scores each depth on its own rows. Polynomial windows are selected on train.
 
 ![Observed against predicted one-step increments for one held-out clip, shoulder rotation. Plotted on the increment rather than the state because persistence alone scores 0.968 on the state, so state-space curves overlay and show nothing.](results/figures/fig3_increments.pdf){width=100%}
 
-The fitted model clears the momentum control by 0.257 uniform, and both aggregations agree in
-sign for the first time in this project's forecasting results. Constant-acceleration
-extrapolation is far worse than either, which is consistent with the noise level in the
-increments.
+Polynomial extrapolation fails, and fails worse as the window widens: a wider fit extrapolates
+the average velocity over the window, which lags an accelerating motion, and a quadratic
+overshoots. The fitted per-joint model does not fail. Damped momentum — each increment predicted
+as a fixed fraction, 0.40 to 0.80 by joint, of the last — reaches +0.3356 uniform with 8
+coefficients, 87 percent of the sparse fit's skill. The sparse fit's margin over the strongest
+local motion model, per-joint AR(3), is +0.026 uniform and +0.033 pooled, positive under both
+aggregations. Of its +0.050 margin over damped momentum, about half comes from deeper own history
+and the rest from levels and cross-joint terms, consistent with the self-terms-only sparse fit
+scoring +0.3713 against +0.3881 on the depth-table rows. Against the unfitted 2-frame control alone
+the margin would be 0.26; damped momentum shows that control is a weak bar.
 
 ### 7.2 The pipeline reproduces it
 
@@ -574,6 +586,10 @@ that manufactured the weak-form result, retained because the repair is a change 
 rather than to the write-up. Appendix D is the aggregation disagreement behind the sixth
 near-miss.
 
+One result shrank rather than dissolved. The Section 7.1 sparse fit clears an unfitted momentum
+control by 0.257 uniform skill but the strongest fitted local motion model, a per-joint
+autoregression, by only 0.026. A fitted model's control should be fitted too, on the same rows.
+
 ## 9. Limitations and future work
 
 - The dataset is 140 clips from a single camera view, and may not cover enough athlete, view, and motion variability to support a global model.
@@ -587,6 +603,8 @@ near-miss.
 - The H=240 horizon result rests on the 13 clips long enough to qualify, and is reported as a direction rather than a finding.
 - The noise-floor estimate is computed on already-smoothed features, so it bounds achievable precision in the modeled state rather than measuring raw MediaPipe jitter.
 - The Section 7 result is a one-step increment model on a delay-augmented state. It is not a free-running dynamical system and cannot be integrated forward; Section 5 shows what happens when such a model is rolled out. It also rests on a single train/test split with no confidence interval.
+- Most of the Section 7 skill is reached by per-joint damped momentum with 8 coefficients (+0.3356 of +0.3858 uniform); the sparse fit's margin over the best local motion model is +0.026, also on a single split with no interval.
+- Positions are smoothed with a centered Savitzky-Golay filter (`extract_baseball_features.py`), which uses future frames. Part of the short-range increment autocorrelation that every one-step model and control here exploits is therefore set by the filter window, and a causal smoother would be the cleaner test.
 - The cross-joint coupling gain is statistically detectable but averages about 1.8 percent of the delay model's skill across resplits, and is absent on one held-out split in five. It shows that joints are coupled, which is expected of any linked body. The directional asymmetry that would evidence the proximal-to-distal chain was tested and does not survive: +0.0011, CI [-0.0004, +0.0026], positive on 18 of 30 splits.
 - The chain ordering used in that test follows the throwing sequence described by Fleisig et al. [2] — stride, pelvis, upper torso, elbow, shoulder, wrist — rather than the data. A different defensible ordering could change the result.
 - The Appendix B null cannot distinguish absence of label signal from insufficient power at 140 clips.
@@ -675,7 +693,8 @@ The defensible claim is:
 > rather than by pose noise. Third, the pipeline's own sparse equations capture almost none of that
 > structure as configured, but the cause is the state and not the estimator: the same sparse
 > estimator on a delay-augmented state reaches +0.3881 uniform skill over persistence with 30
-> terms, matching dense ridge and clearing an unfitted momentum control at +0.1311. That state is
+> terms, matching dense ridge, though per-joint damped momentum with 8 coefficients reaches +0.3356
+> and the margin over the best local motion model is +0.026. That state is
 > now a first-class pipeline configuration, and running the standard commands on it yields +0.4071
 > skill and the project's first positive derivative R2 (+0.4411).
 
@@ -785,7 +804,7 @@ done
   --column-set rates
 ```
 
-Reproduce Section 7 and Appendix A (sparse fit on a delay-augmented state, with the momentum controls
+Reproduce Section 7 and Appendix A (sparse fit on a delay-augmented state, with the local motion controls
 and the coupling ablation):
 
 ```bash
