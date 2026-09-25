@@ -33,6 +33,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -58,6 +59,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--equations-threshold", type=float, default=0.05)
     p.add_argument("--control-max-window", type=int, default=9,
                    help="Widest local-polynomial window. Also sets the shared control row set.")
+    p.add_argument("--resplits", type=int, default=40,
+                   help="Clip-level resplits for the paired margin over local motion; 0 skips.")
+    p.add_argument("--resplit-seed", type=int, default=7)
     p.add_argument("--output-dir", default="results/analysis/delay_sindy")
     return p.parse_args()
 
@@ -169,11 +173,7 @@ def local_motion_controls(tr: list[dict], te: list[dict], start: int, max_window
     for p in (1, 2, 3):
         Dtr, Ytr = increments(rtr, p)
         Dte, Yte = increments(rte, p)
-        pred = np.zeros_like(Yte)
-        for j in range(Ytr.shape[1]):
-            a = np.linalg.lstsq(Dtr[:, j, :], Ytr[:, j], rcond=None)[0]
-            pred[:, j] = Dte[:, j, :] @ a
-        sp, su = skill(Yte, pred)
+        sp, su = skill(Yte, per_joint_ar(Dtr, Ytr, Dte))
         label = "per-joint AR(1) [damped momentum]" if p == 1 else f"per-joint AR({p})"
         out.append({"estimator": label, "params": p * Ytr.shape[1],
                     "skill_pooled": sp, "skill_uniform": su})
@@ -212,10 +212,61 @@ def fit_stlsq(Ztr: np.ndarray, Ytr: np.ndarray, threshold: float,
     return coefs
 
 
+def per_joint_ar(Dtr: np.ndarray, Ytr: np.ndarray, Dte: np.ndarray) -> np.ndarray:
+    """Least-squares AR on each joint's own past increments. D has shape (rows, joints, lags)."""
+    pred = np.zeros((Dte.shape[0], Ytr.shape[1]))
+    for j in range(Ytr.shape[1]):
+        a = np.linalg.lstsq(Dtr[:, j, :], Ytr[:, j], rcond=None)[0]
+        pred[:, j] = Dte[:, j, :] @ a
+    return pred
+
+
+def resplit_margins(clips: list[dict], depth: int, threshold: float, start: int,
+                    target_idx: list[int], n_splits: int, seed: int,
+                    test_fraction: float = 0.2) -> list[dict]:
+    """Paired margin of the sparse delay fit over fitted local motion, across clip resplits.
+
+    Same splits and seed as `stabilize_delay_fit.py`, and the same stable design: the derived
+    `hip_shoulder_separation_angle` is dropped from every lag, which is what removes the
+    divergence Appendix F diagnoses. Each split scores every model on identical rows, so the
+    per-split difference is paired.
+    """
+    names = clips[0]["names"]
+    keep = [i for i, nm in enumerate(names) if nm != "hip_shoulder_separation_angle"]
+    cols = [k * len(names) + i for k in range(depth) for i in keep]
+    blocks = []
+    for c in clips:
+        D, Y, _ = design([c], depth, target_idx, start)
+        if D.size == 0:
+            continue
+        rows = control_rows([c], start)
+        A = np.array([np.stack([X[t - k, target_idx] - X[t - k - 1, target_idx]
+                                for k in range(3)], -1) for X, t in rows])
+        blocks.append((D[:, cols], Y, A))
+
+    rng = np.random.default_rng(seed)
+    n = len(blocks)
+    n_te = max(int(round(n * test_fraction)), 2)
+    out = []
+    for perm in (rng.permutation(n) for _ in range(n_splits)):
+        te, tr = perm[:n_te], perm[n_te:]
+        Dtr, Ytr, Atr = (np.vstack([blocks[i][k] for i in tr]) for k in range(3))
+        Dte, Yte, Ate = (np.vstack([blocks[i][k] for i in te]) for k in range(3))
+        scaler = StandardScaler().fit(Dtr)
+        ymu, ysd = Ytr.mean(axis=0), Ytr.std(axis=0)
+        ysd[ysd < 1e-12] = 1.0
+        coefs = fit_stlsq(scaler.transform(Dtr), (Ytr - ymu) / ysd, threshold)
+        sparse = skill(Yte, (scaler.transform(Dte) @ coefs.T) * ysd + ymu)
+        for p in (1, 3):
+            ar = skill(Yte, per_joint_ar(Atr[:, :, :p], Ytr, Ate[:, :, :p]))
+            out.append({"lags": p, "sparse_pooled": sparse[0], "sparse_uniform": sparse[1],
+                        "ar_pooled": ar[0], "ar_uniform": ar[1]})
+    return out
+
+
 def main() -> None:
     args = parse_args()
     from sklearn.linear_model import RidgeCV
-    from sklearn.preprocessing import StandardScaler
 
     tr = load(args.feature_subdir, args.train_split, args.task_type)
     te = load(args.feature_subdir, args.eval_split, args.task_type)
@@ -284,6 +335,26 @@ def main() -> None:
                      "skill_uniform": r["skill_uniform"]})
         print(f"  {r['estimator']:48s} {r['params']:>3d} params  skill pooled "
               f"{r['skill_pooled']:+.4f}  uniform {r['skill_uniform']:+.4f}")
+
+    if args.resplits:
+        print(f"\n--- paired margin over local motion, {args.resplits} clip-level resplits ---")
+        margins = resplit_margins(tr + te, args.equations_depth, args.equations_threshold, start,
+                                  target_idx, args.resplits, args.resplit_seed)
+        for p in (1, 3):
+            ms = [m for m in margins if m["lags"] == p]
+            for agg in ("uniform", "pooled"):
+                d = np.array([m[f"sparse_{agg}"] - m[f"ar_{agg}"] for m in ms])
+                half = 1.96 * d.std(ddof=1) / np.sqrt(d.size)
+                ar = float(np.mean([m[f"ar_{agg}"] for m in ms]))
+                sp = float(np.mean([m[f"sparse_{agg}"] for m in ms]))
+                print(f"  vs AR({p}) {agg:7s}: sparse {sp:+.4f}  AR {ar:+.4f}  margin "
+                      f"{d.mean():+.4f} [{d.mean() - half:+.4f}, {d.mean() + half:+.4f}]  "
+                      f"positive on {int(np.sum(d > 0))}/{d.size}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with (out_dir / "local_motion_resplits.csv").open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(margins[0].keys()))
+            w.writeheader()
+            w.writerows(margins)
 
     # Coupling ablation: does anything beyond each joint's own history contribute?
     print(f"\n--- coupling ablation at depth {args.equations_depth}, "
