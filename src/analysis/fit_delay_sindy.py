@@ -264,6 +264,19 @@ def resplit_margins(clips: list[dict], depth: int, threshold: float, start: int,
     return out
 
 
+def sparse_on_rows(tr: list[dict], te: list[dict], depth: int, threshold: float, start: int,
+                   target_idx: list[int]) -> tuple[float, float, int]:
+    """(pooled, uniform, nonzero terms) of the sparse delay fit scored from frame `start` on."""
+    D_tr, Y_tr, _ = design(tr, depth, target_idx, start)
+    D_te, Y_te, _ = design(te, depth, target_idx, start)
+    scaler = StandardScaler().fit(D_tr)
+    ymu, ysd = Y_tr.mean(axis=0), Y_tr.std(axis=0)
+    ysd[ysd < 1e-12] = 1.0
+    coefs = fit_stlsq(scaler.transform(D_tr), (Y_tr - ymu) / ysd, threshold)
+    sp, su = skill(Y_te, (scaler.transform(D_te) @ coefs.T) * ysd + ymu)
+    return sp, su, int(np.sum(np.abs(coefs) > 1e-10))
+
+
 def main() -> None:
     args = parse_args()
     from sklearn.linear_model import RidgeCV
@@ -319,16 +332,11 @@ def main() -> None:
     start = max(args.control_max_window, max(args.depths)) - 1
     print(f"\n--- local motion controls (shared rows, t >= {start}) ---")
     ctrl = local_motion_controls(tr, te, start, args.control_max_window, target_idx)
-    D_tr, Y_tr, _ = design(tr, args.equations_depth, target_idx, start)
-    D_te, Y_te, _ = design(te, args.equations_depth, target_idx, start)
-    scaler = StandardScaler().fit(D_tr)
-    ymu, ysd = Y_tr.mean(axis=0), Y_tr.std(axis=0)
-    ysd[ysd < 1e-12] = 1.0
-    coefs = fit_stlsq(scaler.transform(D_tr), (Y_tr - ymu) / ysd, args.equations_threshold)
-    sp, su = skill(Y_te, (scaler.transform(D_te) @ coefs.T) * ysd + ymu)
+    sp, su, nz = sparse_on_rows(tr, te, args.equations_depth, args.equations_threshold, start,
+                                target_idx)
     ctrl.append({"estimator": f"STLSQ thr={args.equations_threshold} [depth {args.equations_depth}, "
                               f"shared control rows]",
-                 "params": int(np.sum(np.abs(coefs) > 1e-10)), "skill_pooled": sp, "skill_uniform": su})
+                 "params": nz, "skill_pooled": sp, "skill_uniform": su})
     for r in ctrl:
         rows.append({"depth": 0, "design_dims": 0, "estimator": f"control: {r['estimator']}",
                      "nonzero_coefs": r["params"], "skill_pooled": r["skill_pooled"],
