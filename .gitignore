@@ -22,3 +22,6 @@ results/
 # is unavailable. Media is never committed.
 data/**/local_media_cache/
 *.mp4
+
+# git worktrees (Haviland convention: git worktree add .worktrees/<branch>)
+.worktrees/
