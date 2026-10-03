@@ -33,6 +33,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -56,6 +57,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--equations-depth", type=int, default=3,
                    help="Depth at which to write out the discovered sparse equations.")
     p.add_argument("--equations-threshold", type=float, default=0.05)
+    p.add_argument("--control-max-window", type=int, default=9,
+                   help="Widest local-polynomial window. Also sets the shared control row set.")
+    p.add_argument("--resplits", type=int, default=40,
+                   help="Clip-level resplits for the paired margin over local motion; 0 skips.")
+    p.add_argument("--resplit-seed", type=int, default=7)
     p.add_argument("--output-dir", default="results/analysis/delay_sindy")
     return p.parse_args()
 
@@ -72,18 +78,21 @@ def load(subdir: str, split: str, task_type: str) -> list[dict]:
     return out
 
 
-def design(clips: list[dict], depth: int, target_idx: list[int]) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Rows of [x(t), delta(t-1), ..., delta(t-depth+1)] against target delta(t)."""
+def design(clips: list[dict], depth: int, target_idx: list[int],
+           start: int | None = None) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Rows of [x(t), delta(t-1), ..., delta(t-depth+1)] against target delta(t).
+
+    `start` raises the first predicted frame so the rows match another model's."""
     names = clips[0]["names"]
     D, Y = [], []
     for c in clips:
         X = c["X"]
         n = X.shape[0]
         # need depth-1 past increments and one future frame
-        start = depth - 1
-        if n < start + 2:
+        first = depth - 1 if start is None else max(start, depth - 1)
+        if n < first + 2:
             continue
-        for t in range(start, n - 1):
+        for t in range(first, n - 1):
             feats = [X[t]]
             for k in range(depth - 1):
                 feats.append(X[t - k] - X[t - k - 1])
@@ -106,35 +115,69 @@ def skill(true: np.ndarray, pred: np.ndarray) -> tuple[float, float]:
     return pooled, uniform
 
 
-def momentum_controls(clips: list[dict], depth: int, target_idx: list[int]) -> dict[str, tuple[float, float]]:
-    """Unfitted controls for the delay model. No parameters at all.
+def control_rows(clips: list[dict], start: int) -> list[tuple[np.ndarray, int]]:
+    """(X, t) for every predictable frame t >= start, so all controls share one row set."""
+    return [(c["X"], t) for c in clips for t in range(start, c["X"].shape[0] - 1)]
+
+
+def poly_extrapolation_weights(window: int, degree: int) -> np.ndarray:
+    """Linear filter equal to a least-squares polynomial over the last `window` frames,
+    evaluated one frame ahead. window = degree + 1 is exact interpolation."""
+    t = np.arange(-window + 1, 1, dtype=float)
+    return np.ones(degree + 1) @ np.linalg.pinv(np.vander(t, degree + 1, increasing=True))
+
+
+def local_motion_controls(tr: list[dict], te: list[dict], start: int, max_window: int,
+                          target_idx: list[int]) -> list[dict]:
+    """Local motion models for the delay fit, scored on one shared row set.
 
     The fitted equations are dominated by each variable's own previous increment, which is
     momentum rather than biomechanics: a joint tends to keep moving as it was moving. So the
-    control that matters is not persistence (zero increment) but momentum:
+    controls that matter are local motion models, not persistence:
 
-        first_order   delta_hat(t) = delta(t-1)
-        second_order  delta_hat(t) = 2*delta(t-1) - delta(t-2)   (constant-acceleration)
+        local polynomial  degree 1 or 2 least-squares fit over the last W frames, extrapolated
+                          one frame. W=2 linear is delta_hat(t) = delta(t-1); W=3 quadratic is
+                          constant acceleration, 2*delta(t-1) - delta(t-2). No fitted parameters;
+                          W is also picked on train so the grid cannot be cherry-picked on test.
+        per-joint AR(p)   delta_hat_j(t) = sum_k a_jk delta_j(t-k), least squares on train.
+                          p=1 is damped momentum. Own history only: no levels, no coupling.
 
-    Any claim that the fit has learned coupling between joints has to survive comparison
-    against these, because they reproduce the self-terms for free.
+    Any claim that the sparse fit learned more than local motion has to clear the best of these.
     """
-    out: dict[str, list] = {"momentum_first_order": [[], []], "momentum_second_order": [[], []]}
-    for c in clips:
-        X = c["X"]
-        n = X.shape[0]
-        start = max(depth - 1, 2)
-        if n < start + 2:
-            continue
-        for t in range(start, n - 1):
-            true = X[t + 1, target_idx] - X[t, target_idx]
-            d1 = X[t, target_idx] - X[t - 1, target_idx]
-            d2 = X[t - 1, target_idx] - X[t - 2, target_idx]
-            out["momentum_first_order"][0].append(true)
-            out["momentum_first_order"][1].append(d1)
-            out["momentum_second_order"][0].append(true)
-            out["momentum_second_order"][1].append(2.0 * d1 - d2)
-    return {k: skill(np.asarray(v[0]), np.asarray(v[1])) for k, v in out.items()}
+    rtr, rte = control_rows(tr, start), control_rows(te, start)
+
+    def increments(rows, lags):
+        D = np.array([np.stack([X[t - k, target_idx] - X[t - k - 1, target_idx] for k in range(lags)], -1)
+                      for X, t in rows])
+        Y = np.array([X[t + 1, target_idx] - X[t, target_idx] for X, t in rows])
+        return D, Y
+
+    def poly_skill(rows, window, degree):
+        w = poly_extrapolation_weights(window, degree)
+        true = np.array([X[t + 1, target_idx] - X[t, target_idx] for X, t in rows])
+        pred = np.array([w @ X[t - window + 1:t + 1, target_idx] - X[t, target_idx] for X, t in rows])
+        return skill(true, pred)
+
+    out = []
+    for degree in (1, 2):
+        grid = {w: (poly_skill(rtr, w, degree), poly_skill(rte, w, degree))
+                for w in range(degree + 1, max_window + 1)}
+        for w, (_, (sp, su)) in grid.items():
+            out.append({"estimator": f"local poly deg={degree} W={w}", "params": 0,
+                        "skill_pooled": sp, "skill_uniform": su})
+        best = max(grid, key=lambda w: grid[w][0][1])
+        sp, su = grid[best][1]
+        out.append({"estimator": f"local poly deg={degree} [train-selected W={best}]", "params": 0,
+                    "skill_pooled": sp, "skill_uniform": su})
+
+    for p in (1, 2, 3):
+        Dtr, Ytr = increments(rtr, p)
+        Dte, Yte = increments(rte, p)
+        sp, su = skill(Yte, per_joint_ar(Dtr, Ytr, Dte))
+        label = "per-joint AR(1) [damped momentum]" if p == 1 else f"per-joint AR({p})"
+        out.append({"estimator": label, "params": p * Ytr.shape[1],
+                    "skill_pooled": sp, "skill_uniform": su})
+    return out
 
 
 def self_only_mask(labels: list[str], target_names: list[str], names: list[str]) -> np.ndarray:
@@ -169,10 +212,74 @@ def fit_stlsq(Ztr: np.ndarray, Ytr: np.ndarray, threshold: float,
     return coefs
 
 
+def per_joint_ar(Dtr: np.ndarray, Ytr: np.ndarray, Dte: np.ndarray) -> np.ndarray:
+    """Least-squares AR on each joint's own past increments. D has shape (rows, joints, lags)."""
+    pred = np.zeros((Dte.shape[0], Ytr.shape[1]))
+    for j in range(Ytr.shape[1]):
+        a = np.linalg.lstsq(Dtr[:, j, :], Ytr[:, j], rcond=None)[0]
+        pred[:, j] = Dte[:, j, :] @ a
+    return pred
+
+
+def resplit_margins(clips: list[dict], depth: int, threshold: float, start: int,
+                    target_idx: list[int], n_splits: int, seed: int,
+                    test_fraction: float = 0.2) -> list[dict]:
+    """Paired margin of the sparse delay fit over fitted local motion, across clip resplits.
+
+    Same splits and seed as `stabilize_delay_fit.py`, and the same stable design: the derived
+    `hip_shoulder_separation_angle` is dropped from every lag, which is what removes the
+    divergence Appendix F diagnoses. Each split scores every model on identical rows, so the
+    per-split difference is paired.
+    """
+    names = clips[0]["names"]
+    keep = [i for i, nm in enumerate(names) if nm != "hip_shoulder_separation_angle"]
+    cols = [k * len(names) + i for k in range(depth) for i in keep]
+    blocks = []
+    for c in clips:
+        D, Y, _ = design([c], depth, target_idx, start)
+        if D.size == 0:
+            continue
+        rows = control_rows([c], start)
+        A = np.array([np.stack([X[t - k, target_idx] - X[t - k - 1, target_idx]
+                                for k in range(3)], -1) for X, t in rows])
+        blocks.append((D[:, cols], Y, A))
+
+    rng = np.random.default_rng(seed)
+    n = len(blocks)
+    n_te = max(int(round(n * test_fraction)), 2)
+    out = []
+    for perm in (rng.permutation(n) for _ in range(n_splits)):
+        te, tr = perm[:n_te], perm[n_te:]
+        Dtr, Ytr, Atr = (np.vstack([blocks[i][k] for i in tr]) for k in range(3))
+        Dte, Yte, Ate = (np.vstack([blocks[i][k] for i in te]) for k in range(3))
+        scaler = StandardScaler().fit(Dtr)
+        ymu, ysd = Ytr.mean(axis=0), Ytr.std(axis=0)
+        ysd[ysd < 1e-12] = 1.0
+        coefs = fit_stlsq(scaler.transform(Dtr), (Ytr - ymu) / ysd, threshold)
+        sparse = skill(Yte, (scaler.transform(Dte) @ coefs.T) * ysd + ymu)
+        for p in (1, 3):
+            ar = skill(Yte, per_joint_ar(Atr[:, :, :p], Ytr, Ate[:, :, :p]))
+            out.append({"lags": p, "sparse_pooled": sparse[0], "sparse_uniform": sparse[1],
+                        "ar_pooled": ar[0], "ar_uniform": ar[1]})
+    return out
+
+
+def sparse_on_rows(tr: list[dict], te: list[dict], depth: int, threshold: float, start: int,
+                   target_idx: list[int]) -> tuple[float, float, int]:
+    """(pooled, uniform, nonzero terms) of the sparse delay fit scored from frame `start` on."""
+    D_tr, Y_tr, _ = design(tr, depth, target_idx, start)
+    D_te, Y_te, _ = design(te, depth, target_idx, start)
+    scaler = StandardScaler().fit(D_tr)
+    ymu, ysd = Y_tr.mean(axis=0), Y_tr.std(axis=0)
+    ysd[ysd < 1e-12] = 1.0
+    coefs = fit_stlsq(scaler.transform(D_tr), (Y_tr - ymu) / ysd, threshold)
+    sp, su = skill(Y_te, (scaler.transform(D_te) @ coefs.T) * ysd + ymu)
+    return sp, su, int(np.sum(np.abs(coefs) > 1e-10))
+
+
 def main() -> None:
     args = parse_args()
     from sklearn.linear_model import RidgeCV
-    from sklearn.preprocessing import StandardScaler
 
     tr = load(args.feature_subdir, args.train_split, args.task_type)
     te = load(args.feature_subdir, args.eval_split, args.task_type)
@@ -219,18 +326,43 @@ def main() -> None:
 
     out_dir = PROJECT_ROOT / args.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    with (out_dir / "skill_by_depth.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
-        w.writeheader()
-        w.writerows(rows)
 
-    # Unfitted momentum controls: the bar the fitted model must clear to mean anything.
-    print(f"\n--- unfitted controls (no parameters) ---")
-    ctrl = momentum_controls(te, max(args.depths), target_idx)
-    for cname, (sp, su) in ctrl.items():
-        rows.append({"depth": 0, "design_dims": 0, "estimator": cname,
-                     "nonzero_coefs": 0, "skill_pooled": sp, "skill_uniform": su})
-        print(f"  {cname:24s} skill pooled {sp:+.4f}  uniform {su:+.4f}")
+    # Local motion controls: the bar the fitted model must clear to mean anything. Scored,
+    # together with the sparse fit, on one row set that every window can reach.
+    start = max(args.control_max_window, max(args.depths)) - 1
+    print(f"\n--- local motion controls (shared rows, t >= {start}) ---")
+    ctrl = local_motion_controls(tr, te, start, args.control_max_window, target_idx)
+    sp, su, nz = sparse_on_rows(tr, te, args.equations_depth, args.equations_threshold, start,
+                                target_idx)
+    ctrl.append({"estimator": f"STLSQ thr={args.equations_threshold} [depth {args.equations_depth}, "
+                              f"shared control rows]",
+                 "params": nz, "skill_pooled": sp, "skill_uniform": su})
+    for r in ctrl:
+        rows.append({"depth": 0, "design_dims": 0, "estimator": f"control: {r['estimator']}",
+                     "nonzero_coefs": r["params"], "skill_pooled": r["skill_pooled"],
+                     "skill_uniform": r["skill_uniform"]})
+        print(f"  {r['estimator']:48s} {r['params']:>3d} params  skill pooled "
+              f"{r['skill_pooled']:+.4f}  uniform {r['skill_uniform']:+.4f}")
+
+    if args.resplits:
+        print(f"\n--- paired margin over local motion, {args.resplits} clip-level resplits ---")
+        margins = resplit_margins(tr + te, args.equations_depth, args.equations_threshold, start,
+                                  target_idx, args.resplits, args.resplit_seed)
+        for p in (1, 3):
+            ms = [m for m in margins if m["lags"] == p]
+            for agg in ("uniform", "pooled"):
+                d = np.array([m[f"sparse_{agg}"] - m[f"ar_{agg}"] for m in ms])
+                half = 1.96 * d.std(ddof=1) / np.sqrt(d.size)
+                ar = float(np.mean([m[f"ar_{agg}"] for m in ms]))
+                sp = float(np.mean([m[f"sparse_{agg}"] for m in ms]))
+                print(f"  vs AR({p}) {agg:7s}: sparse {sp:+.4f}  AR {ar:+.4f}  margin "
+                      f"{d.mean():+.4f} [{d.mean() - half:+.4f}, {d.mean() + half:+.4f}]  "
+                      f"positive on {int(np.sum(d > 0))}/{d.size}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with (out_dir / "local_motion_resplits.csv").open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(margins[0].keys()))
+            w.writeheader()
+            w.writerows(margins)
 
     # Coupling ablation: does anything beyond each joint's own history contribute?
     print(f"\n--- coupling ablation at depth {args.equations_depth}, "
@@ -295,6 +427,11 @@ def main() -> None:
               f"cost of sparsity vs dense = {gap:.4f}")
     else:
         print("  sparse model does not beat persistence under both aggregations")
+    # Written last so the control and ablation rows land in the CSV, not only on the console.
+    with (out_dir / "skill_by_depth.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
     print(f"\noutput: {(out_dir / 'skill_by_depth.csv').relative_to(PROJECT_ROOT).as_posix()}")
 
 
