@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Render the technical paper's figures as vector PDFs.
 
-The paper carries twenty tables and no figures, which is the wrong balance for its central
-argument: three of its claims are about the SHAPE of a curve, and a shape is what a table
-communicates worst.
+Every figure shares one style: the same palette, type sizes, line weights and a legend set
+above the axes. Nothing is written inside a plot area -- no arrows, callouts or direct labels.
+What the reader should look at is said in the caption instead.
 
+  Figure 0  the pipeline, from broadcast video through pose extraction to sparse
+            identification and evaluation against controls.
   Figure 1  skill over persistence against history depth -- the paper's main result, and an
             emphasis form: the sparse model is the point, dense ridge and the two unfitted
             controls are context, so one hue carries the subject and grey carries the rest.
@@ -16,10 +18,8 @@ communicates worst.
             curve overlays -- and the increment is what the model actually predicts.
 
 Colours are the validated categorical slots 1-3 (blue, orange, aqua): worst adjacent CVD
-deltaE 9.2, normal-vision 27.6, both above their gates. The aqua slot carries a contrast
-warning against a light surface, which is relieved here by direct labels on every series and
-by the tables that carry the same numbers. Every series also has a distinct line style, so
-identity survives greyscale printing and colourblind readers alike.
+deltaE 9.2, normal-vision 27.6, both above their gates. Every series also has a distinct line
+style and marker, so identity survives greyscale printing and colourblind readers alike.
 
 Usage:
     python src/analysis/make_paper_figures.py
@@ -74,6 +74,58 @@ def recessive(ax) -> None:
         ax.spines[side].set_visible(False)
 
 
+def legend_above(ax, ncol: int, handles=None, labels=None) -> None:
+    """Every figure keys its series the same way: one row above the axes, outside the data."""
+    if handles is None:
+        handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles, labels, loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=ncol,
+              borderaxespad=0.0, columnspacing=1.2, handlelength=2.4)
+
+
+def fig0_pipeline(out: Path) -> None:
+    from matplotlib.patches import FancyBboxPatch
+
+    stages = [
+        ("Broadcast video", "MLB-YouTube,\n140 pitching clips"),
+        ("Pose extraction", "MediaPipe BlazePose,\nper-frame landmarks"),
+        ("Standardization", "15-joint schema,\nhip-centred"),
+        ("Preprocessing", "gap fill, Savitzky-\nGolay smoothing, trim"),
+        ("Features", "10 kinematic variables,\nhandedness-canonical"),
+        ("State", "first-order $x$, or\n$x$ + past increments"),
+        ("Sparse model", "SINDy, STLSQ on a\npolynomial library"),
+        ("Evaluation", "held-out clips vs\nfrozen, persistence, AR"),
+    ]
+    fig, ax = plt.subplots(figsize=(FULL_W, 1.55))
+    ax.set_xlim(0, 4)
+    ax.set_ylim(0, 2)
+    ax.axis("off")
+    w, h, gx = 0.86, 0.78, 0.14
+    for i, (title, body) in enumerate(stages):
+        row, col = divmod(i, 4)
+        x = col * (w + gx) + 0.02
+        y = 1.12 - row * 1.06
+        modeling = i >= 5
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.06",
+                                    fc="#eef4fc" if modeling else "#f4f3f0",
+                                    ec=BLUE if modeling else MUTED, lw=0.8))
+        ax.text(x + w / 2, y + h - 0.13, title, ha="center", va="top", fontsize=7.5,
+                weight="bold", color=INK)
+        ax.text(x + w / 2, y + h - 0.36, body, ha="center", va="top", fontsize=6.5, color=INK_2,
+                linespacing=1.25)
+        if col < 3:
+            ax.annotate("", xy=(x + w + gx - 0.01, y + h / 2), xytext=(x + w + 0.01, y + h / 2),
+                        arrowprops=dict(arrowstyle="-|>", color=INK_2, lw=0.8))
+    # Row wrap: down from the last box of row one, left through the gap between the rows, and
+    # down into the first box of row two, so the connector never crosses a box.
+    xe, xs = 3 * (w + gx) + 0.02 + w / 2, 0.02 + w / 2
+    top2, mid = 0.06 + h, (0.06 + h + 1.12) / 2
+    ax.plot([xe, xe, xs], [1.12, mid, mid], color=INK_2, lw=0.8, solid_joinstyle="miter")
+    ax.annotate("", xy=(xs, top2 + 0.01), xytext=(xs, mid + 0.004),
+                arrowprops=dict(arrowstyle="-|>", color=INK_2, lw=0.8, shrinkA=0, shrinkB=0))
+    fig.savefig(out / "fig0_pipeline.pdf")
+    plt.close(fig)
+
+
 def fig1_skill_by_depth(out: Path) -> None:
     rows = list(csv.DictReader((PROJECT_ROOT / "results/analysis/delay_sindy/skill_by_depth.csv").open()))
     depths = sorted({int(r["depth"]) for r in rows if int(r["depth"]) > 0})
@@ -85,38 +137,23 @@ def fig1_skill_by_depth(out: Path) -> None:
         sparse.append(st[0] if st else np.nan)
         dense.append(rg[0] if rg else np.nan)
 
-    fig, ax = plt.subplots(figsize=(COL_W, 2.6))
+    fig, ax = plt.subplots(figsize=(COL_W, 2.4))
     recessive(ax)
-
-    # Reference levels, labelled at the left so they never compete with the legend.
-    ax.axhline(0.0, color=MUTED, lw=1.0)
-    ax.axhline(0.1265, color=MUTED, lw=1.0, ls=":")
-    ax.axhline(0.3356, color=MUTED, lw=1.0, ls=":")
-    ax.text(depths[0] - 0.05, 0.012, "persistence", color=INK_2, fontsize=6.5, va="bottom")
-    ax.text(depths[0] - 0.05, 0.138, "momentum, unfitted", color=INK_2, fontsize=6.5, va="bottom")
-    ax.text(depths[0] - 0.05, 0.325, "damped momentum,\n8 coefficients", color=INK_2, fontsize=6.5,
-            va="top")
-
-    # The two estimators coincide, which is the finding rather than a plotting accident.
-    # Dense ridge is drawn as a wide pale band so the overlap is legible as overlap.
+    ax.axhline(0.0, color=MUTED, lw=1.0, label="persistence")
+    ax.axhline(0.1265, color=INK_2, lw=1.0, ls=":", label="momentum, unfitted")
+    ax.axhline(0.3356, color=AQUA, lw=1.2, ls="-.", label="damped momentum, 8 coef.")
+    # Dense ridge is a wide pale band so that its overlap with the sparse line reads as overlap.
     ax.plot(depths, dense, color=MUTED, lw=5.0, alpha=0.35, solid_capstyle="round",
-            label="dense ridge, 240 coefficients")
-    ax.plot(depths, sparse, color=BLUE, lw=1.8, marker="o", ms=4.5,
-            label="sparse STLSQ, 32 terms")
-
-    ax.annotate("sparse fit sits inside\nthe dense-ridge band",
-                xy=(4, sparse[3]), xytext=(3.0, 0.245), color=INK_2, fontsize=6.8,
-                arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.7))
-    ax.annotate("one frame of history:\n+0.01 to +0.37", xy=(2, sparse[1]),
-                xytext=(2.15, 0.17), color=BLUE, fontsize=6.8,
-                arrowprops=dict(arrowstyle="->", color=BLUE, lw=0.7))
-
+            label="dense ridge, 240 coef.")
+    ax.plot(depths, sparse, color=BLUE, lw=1.8, marker="o", ms=4.5, label="sparse STLSQ, 32 terms")
     ax.set_xlabel("history depth (frames of past increments)")
     ax.set_ylabel("skill over persistence")
     ax.set_xticks(depths)
-    ax.set_xlim(depths[0] - 0.35, depths[-1] + 0.2)
+    ax.set_xlim(depths[0] - 0.2, depths[-1] + 0.2)
     ax.set_ylim(-0.03, 0.47)
-    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 0.02))
+    h_, l_ = ax.get_legend_handles_labels()
+    order = [4, 3, 2, 1, 0]
+    legend_above(ax, 2, [h_[i] for i in order], [l_[i] for i in order])
     fig.savefig(out / "fig1_skill_by_depth.pdf")
     plt.close(fig)
 
@@ -130,24 +167,18 @@ def fig2_horizon(out: Path) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(FULL_W, 2.4))
     for ax in (a1, a2):
         recessive(ax)
-        ax.plot(h, plain, color=BLUE, lw=2.0, marker="o", ms=4.5, label="first-order, plain")
-        ax.plot(h, weak, color=ORANGE, lw=2.0, ls="--", marker="s", ms=4, label="weak-form")
-        ax.plot(h, frozen, color=AQUA, lw=2.0, ls="-.", marker="^", ms=4.5,
+        ax.plot(h, plain, color=BLUE, lw=1.8, marker="o", ms=4.5, label="first-order, plain")
+        ax.plot(h, weak, color=ORANGE, lw=1.8, ls="--", marker="s", ms=4, label="weak-form")
+        ax.plot(h, frozen, color=AQUA, lw=1.8, ls="-.", marker="^", ms=4.5,
                 label="frozen control (no dynamics)")
         ax.set_xlabel("rollout horizon (frames)")
         ax.set_xticks(h)
     a1.set_ylabel("core-position reconstruction $R^2$")
-    a1.set_title("full range", color=INK_2, loc="left")
-    a2.set_title("zoom: the comparison that matters", color=INK_2, loc="left")
+    a1.set_title("(a) full range", color=INK_2, loc="left", pad=16)
+    a2.set_title(r"(b) zoom, $R^2 \geq -9.5$", color=INK_2, loc="left", pad=16)
     a2.set_ylim(-9.5, -1.0)
-    a2.annotate("frozen control is best\nat every horizon", xy=(20, -4.23),
-                xytext=(9, -8.9), color=INK_2, fontsize=7,
-                arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.8))
-    # Direct labels in the zoom, so identity does not rest on the other panel's legend.
-    a2.text(40.4, -5.57, "frozen", color=AQUA, fontsize=7, va="center")
-    a2.text(40.4, -7.89, "weak-form", color=ORANGE, fontsize=7, va="center")
-    a2.set_xlim(4, 52)
-    a1.legend(loc="lower right")
+    fig.legend(*a1.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 0.98),
+               ncol=3, columnspacing=1.6, handlelength=2.4)
     fig.savefig(out / "fig2_horizon.pdf")
     plt.close(fig)
 
@@ -207,24 +238,16 @@ def fig3_increments(out: Path) -> None:
     n = min(90, len(true))
     t = np.arange(n)
 
-    fig, ax = plt.subplots(figsize=(COL_W, 2.3))
+    fig, ax = plt.subplots(figsize=(COL_W, 2.4))
     recessive(ax)
-    ax.axhline(0.0, color=AQUA, lw=1.6, ls="-.")
+    ax.axhline(0.0, color=AQUA, lw=1.4, ls="-.", label="persistence")
     ax.plot(t, true[:n], color=MUTED, lw=1.8, label="observed")
     ax.plot(t, pred[:n], color=BLUE, lw=1.6, ls="--", label="sparse model")
-    # All three labels sit in the clear band below the traces; placing any of them near the
-    # zero line puts them underneath the curves, which cross it repeatedly.
-    lab_y = min(true[:n]) * 1.28
-    ax.annotate("persistence", xy=(12, 0.0), xytext=(1, lab_y), color=AQUA, fontsize=6.8,
-                arrowprops=dict(arrowstyle="->", color=AQUA, lw=0.7))
-    ax.annotate("observed", xy=(39, true[39]), xytext=(31, lab_y), color=INK_2, fontsize=6.8,
-                arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.7))
-    ax.annotate("sparse model", xy=(49, pred[49]), xytext=(58, lab_y), color=BLUE, fontsize=6.8,
-                arrowprops=dict(arrowstyle="->", color=BLUE, lw=0.7))
     ax.set_xlabel("frame of held-out clip")
     ax.set_ylabel("shoulder rotation increment")
-    ax.set_ylim(min(true[:n]) * 1.45, max(true[:n]) * 1.12)
-    ax.legend(loc="upper right", ncol=2, columnspacing=1.0)
+    ax.set_xlim(0, n - 1)
+    h_, l_ = ax.get_legend_handles_labels()
+    legend_above(ax, 3, [h_[1], h_[2], h_[0]], [l_[1], l_[2], l_[0]])
     fig.savefig(out / "fig3_increments.pdf")
     plt.close(fig)
 
@@ -236,6 +259,7 @@ def main() -> None:
     out = PROJECT_ROOT / args.output_dir
     out.mkdir(parents=True, exist_ok=True)
     style()
+    fig0_pipeline(out)
     fig1_skill_by_depth(out)
     fig2_horizon(out)
     fig3_increments(out)

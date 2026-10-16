@@ -3,8 +3,9 @@
 ## Technical paper
 
 The current write-up is `docs/technical_paper.md`; the built IEEE PDF is
-`YU_TECHNICAL_PAPER_v2.pdf` (`python scripts/build_paper_pdf.py`). Section 11 of the paper
-gives the command for every number it reports.
+`YU_TECHNICAL_PAPER_v3.pdf` (`python scripts/build_paper_pdf.py`). `docs/reproducing.md`
+gives the command for every number the paper reports; `src/analysis/make_paper_figures.py`
+renders its figures.
 
 The Stage B pitching pool is 140 clips, split 111 train / 29 held-out test
 (`data/baseball/splits/pitching_local_*.csv`). The operative configuration must be passed
