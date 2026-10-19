@@ -144,8 +144,8 @@ def fig1_skill_by_depth(out: Path) -> None:
     ax.axhline(0.3356, color=AQUA, lw=1.2, ls="-.", label="damped momentum, 8 coef.")
     # Dense ridge is a wide pale band so that its overlap with the sparse line reads as overlap.
     ax.plot(depths, dense, color=MUTED, lw=5.0, alpha=0.35, solid_capstyle="round",
-            label="dense ridge, 240 coef.")
-    ax.plot(depths, sparse, color=BLUE, lw=1.8, marker="o", ms=4.5, label="sparse STLSQ, 32 terms")
+            label="dense ridge (240 coef. at depth 3)")
+    ax.plot(depths, sparse, color=BLUE, lw=1.8, marker="o", ms=4.5, label="sparse STLSQ (30 terms at depth 3)")
     ax.set_xlabel("history depth (frames of past increments)")
     ax.set_ylabel("skill over persistence")
     ax.set_xticks(depths)

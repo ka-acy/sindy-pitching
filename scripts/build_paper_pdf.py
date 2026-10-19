@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build docs/technical_paper.md into an IEEE-format PDF via pandoc + pdflatex.
 
-Requires `pdflatex` (texlive, including the ieeetran package) on PATH. If `pandoc` is
+Requires `pdflatex` (texlive, including the ieeetran package) and pandoc >= 3.8 (for
+`--syntax-highlighting`) on PATH. If `pandoc` is
 missing, install a bundled binary with
 
     pip install --target <dir> pypandoc-binary

@@ -420,7 +420,7 @@ score it against persistence. Design is `[x(t), delta(t-1), ..., delta(t-d+1)]`,
 next-frame increment of the eight core positions, and history depth is swept rather than
 assumed (`src/analysis/fit_delay_sindy.py`, `results/analysis/delay_sindy/`).
 
-![Uniform skill over persistence on held-out increments against history depth. Note three things. Almost the whole gain arrives between depth 1 and depth 2. The curve is flat from depth 3. The sparse line stays inside the pale dense-ridge band at every depth, so 32 sparse terms match 240 dense coefficients. The horizontal lines are the controls: the unfitted 2-frame momentum (dotted) and 8-coefficient damped momentum (dash-dot). The sparse fit clears damped momentum only from depth 2 on.](results/figures/fig1_skill_by_depth.pdf){width=100%}
+![Uniform skill over persistence on held-out increments against history depth. Note three things. Almost the whole gain arrives between depth 1 and depth 2. The curve is flat from depth 3. The sparse line stays inside the pale dense-ridge band at every depth; at depth 3, 30 sparse terms match 240 dense coefficients. The horizontal lines are the controls: the unfitted 2-frame momentum (dotted) and 8-coefficient damped momentum (dash-dot). The sparse fit clears damped momentum only from depth 2 on.](results/figures/fig1_skill_by_depth.pdf){width=100%}
 
 With no history (depth 1) the sparse fit has 8 terms and scores +0.0109 uniform. One frame of
 history (depth 2, 21 terms) raises that to +0.3739. Skill saturates at depth 3: +0.3881 with 30
