@@ -3,9 +3,22 @@
 ## Technical paper
 
 The current write-up is `docs/technical_paper.md`; the built IEEE PDF is
-`YU_TECHNICAL_PAPER_v3.pdf` (`python scripts/build_paper_pdf.py`). `docs/reproducing.md`
+`YU_TECHNICAL_PAPER_v4.pdf` (`python scripts/build_paper_pdf.py`). `docs/reproducing.md`
 gives the command for every number the paper reports; `src/analysis/make_paper_figures.py`
 renders its figures.
+
+Open engineering follow-ups from the paper (Section 9):
+
+- Decide whether the delay-augmented configuration (`config/preprocessing.baseball.delay.yaml`)
+  becomes the operative default; it answers one-step prediction rather than reconstruction.
+- Add a causal smoothing option to the pipeline's `preprocessing.smoothing` block, so the standard
+  commands can report the unsmoothed or causal skill level directly.
+- Score the ensemble and second-order configurations against the frozen control with paired
+  intervals.
+- Re-score the alignment track under the current pool and the core-position metric.
+- Add automated pose-quality metrics and exclude low-confidence or heavily occluded clips.
+- Batting: try a different pose model or an upstream person detector feeding single-person crops;
+  the batter is detected in only 78 percent of clips.
 
 The Stage B pitching pool is 140 clips, split 111 train / 29 held-out test
 (`data/baseball/splits/pitching_local_*.csv`). The operative configuration must be passed
