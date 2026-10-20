@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build docs/technical_paper.md into an IEEE-format PDF via pandoc + pdflatex.
 
-Requires `pdflatex` (texlive, including the ieeetran package) on PATH. If `pandoc` is
+Requires `pdflatex` (texlive, including the ieeetran package) and pandoc >= 3.8 (for
+`--syntax-highlighting`) on PATH. If `pandoc` is
 missing, install a bundled binary with
 
     pip install --target <dir> pypandoc-binary
@@ -390,7 +391,7 @@ def main() -> None:
         raise SystemExit("pdflatex not found; install texlive")
 
     out_path = Path(args.output) if args.output else PROJECT_ROOT / (
-        "YU_TECHNICAL_PAPER_v2.pdf" if args.style == "ieee" else "technical_paper.pdf"
+        "YU_TECHNICAL_PAPER_v3.pdf" if args.style == "ieee" else "technical_paper.pdf"
     )
     date = args.date or datetime.date.fromtimestamp(SOURCE.stat().st_mtime).strftime("%B %d, %Y")
     body, abstract = preprocess(SOURCE.read_text(), args.style)
@@ -465,10 +466,10 @@ def main() -> None:
         tex = (tmp_path / "paper.tex").read_text()
         if args.style == "ieee":
             tex = longtable_to_float(tex)
-            # The horizon figure is a two-panel comparison and needs the full text width;
+            # The pipeline diagram and the two-panel horizon figure need the full text width;
             # single-column figures stay in `figure`.
             tex = re.sub(
-                r"\\begin\{figure\}(?P<b>((?!\\end\{figure\}).)*fig2_horizon((?!\\end\{figure\}).)*)\\end\{figure\}",
+                r"\\begin\{figure\}(?P<b>((?!\\end\{figure\}).)*(?:fig2_horizon|fig0_pipeline)((?!\\end\{figure\}).)*)\\end\{figure\}",
                 lambda m: "\\begin{figure*}[!t]" + m.group("b") + "\\end{figure*}",
                 tex, flags=re.S)
             # References follow the appendices, so with \appendices in force an ordinary
