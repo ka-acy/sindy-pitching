@@ -289,8 +289,8 @@ not stereotyped enough for template matching either.
 
 ## 6. Diagnosing the failure
 
-Four candidate explanations for the failure are tested in turn. None accounts for it, and the
-evidence points to the state representation as the primary limitation.
+Four candidate explanations for the failure are tested in turn. None accounts for it alone, and the
+evidence favours missing history in the state as the primary limitation.
 
 ### 6.1 Phase and clip heterogeneity
 
@@ -321,8 +321,10 @@ Across all 140 clips, per-feature signal-to-noise is 2.2 to 4.4. The ratio is pe
 over the high-frequency residual. It is highest for `lead_knee_lift` and lowest for
 `dominant_wrist_speed` and the elbow angles (`results/analysis/increment_skill/part_c_noise_floor.csv`).
 Increment lag-1 autocorrelation is 0.35 to 0.88, so increments are far from white and carry
-predictable structure. **The noise floor does not appear to be the limiting factor**, and
-short-horizon prediction is not capped by pose quality at this level. Higher-quality pose remains
+predictable structure. **The noise floor does not appear to be the primary limit.** Increments
+remain predictable at this noise level, so the evidence favours missing history over measurement
+noise as the main explanation. Noise is not ruled out as a contributor: Section 7.3 shows that
+how the pose is smoothed changes the measured skill substantially. Higher-quality pose remains
 desirable for biomechanical interpretation, but it is not a precondition for the Section 7
 result. These autocorrelations are measured on centred-smoothed features and are partly imposed
 by the filter; Section 7.3 measures how much.
@@ -444,9 +446,9 @@ help, which points to a true rank deficiency rather than ordinary ill-conditioni
 | per-joint AR(1): damped momentum | 8 | +0.2242 | +0.3356 | +0.0403 [+0.0380, +0.0425] |
 | per-joint AR(2) | 16 | +0.2420 | +0.3558 | — |
 | per-joint AR(3) | 24 | +0.2449 | +0.3595 | **+0.0187** [+0.0171, +0.0204] |
-| sparse STLSQ, all terms | 31 | **+0.2781** | **+0.3858** | — |
+| sparse STLSQ, depth 3, refit on these rows | 31 | **+0.2781** | **+0.3858** | — |
 
-: Local motion models against the sparse fit (depth 3, threshold 0.05) on the same 6,070 held-out rows, from frame 8 on so every window is available; polynomial windows are selected on train. Read down the uniform column. Every parameter-free extrapolator except the 2-frame one is negative. Damped momentum, with 8 coefficients, reaches 87 percent of the sparse fit. The sparse fit's lead over AR(3) is the smallest margin in the table. The last column pairs rows within each resplit, with a 95% interval. Resplits share training clips, so the intervals are narrower than independent samples would give.
+: Local motion models against the sparse fit (depth 3, threshold 0.05) on the same 6,070 held-out rows, from frame 8 on so every window is available; polynomial windows are selected on train. The sparse fit is the Section 7.1 depth-3 model refit on these rows only, which gives 31 terms rather than 30. Read down the uniform column. Every parameter-free extrapolator except the 2-frame one is negative. Damped momentum, with 8 coefficients, reaches 87 percent of the sparse fit. The sparse fit's lead over AR(3) is the smallest margin in the table. The last column pairs rows within each resplit, with a 95% interval. Resplits share training clips, so the intervals are narrower than independent samples would give.
 
 **Polynomial extrapolation fails, and fails worse as the window widens.** A wider fit extrapolates
 the average velocity over the window, which lags an accelerating motion, and a quadratic
@@ -531,9 +533,10 @@ The thresholds now separate on validation skill (+0.3076 down to +0.3026), so th
 meaningful.
 
 The reconstruction metrics on this configuration read −260.7 and must be ignored. A delay state
-cannot be integrated forward: its delay columns are lagged copies rather than independent degrees
-of freedom, so a free-running rollout is ill-posed. The evaluator prints a warning whenever it
-detects delay columns.
+cannot be integrated as an ordinary system of independent states: its delay columns are lagged
+copies, so a forecast has to be rolled out by shifting the delay window and appending each
+predicted increment, as in Section 5.3. The pipeline's integrator does not do that, so the number
+is not meaningful, and the evaluator prints a warning whenever it detects delay columns.
 
 This configuration is offered as the recommended direction, not as a drop-in replacement for the
 operative one. It answers a different question — one-step prediction rather than trajectory
@@ -571,7 +574,8 @@ broadcast task as extremely difficult.
 
 ## 8. Evaluation lessons
 
-**Methodological finding on evaluation.** Five intermediate results in this project were false positives. Four were caught by adding the no-model control for the specific task being scored; the fifth by a null the analysis had not originally applied per target:
+Table VII is the core of this section. It lists five intermediate results that looked positive
+and did not survive the control or null for their own task.
 
 | apparent result | control that overturned it | outcome |
 |---|---|---|
@@ -583,9 +587,9 @@ broadcast task as extremely difficult.
 
 : Intermediate results that did not survive the control or null for their task.
 
-A sixth near-miss was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 5), and reporting only the pooled figure would have produced another spurious positive. The second-order row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
+**What the five have in common.** All five involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising. Two established results underwrite it: a score expressed against a trivial reference forecast is interpretable where an absolute one is not [23], and a permutation null computed through the identical pipeline is the test that survives when the same folds have also informed a modelling choice [27], [28].
 
-The common structure is that all five involved metrics whose absolute values are uninterpretable without a reference point — R2 against a window mean when the target barely moves, and sum-of-squares pooled across columns of very different amplitude. The practice adopted here, and the one this project would recommend to similar work, is that a metric ships with its no-model control and both aggregations before any model is scored against it, not after a result looks surprising. Two established results underwrite it: a score expressed against a trivial reference forecast is interpretable where an absolute one is not [23], and a permutation null computed through the identical pipeline is the test that survives when the same folds have also informed a modelling choice [27], [28].
+**A sixth near-miss** was an aggregation artifact rather than a missing control: pooled skill is positive at every rollout horizon while uniform skill is negative at every horizon (Section 5), and reporting only the pooled figure would have produced another spurious positive. The second-order row above was anticipated before the run — position-increment prediction is trivial when velocity is a state variable — so the control was built in and the artifact was caught on first inspection rather than after it had been written up.
 
 **A selection rule that manufactured a finding.** The weak-form model was first recorded as the
 best available (core R2 −7.89 against −29.56). Its selected model has a single non-bias term,
@@ -601,12 +605,12 @@ over persistence does not rescue the first-order sweep either: skill spans 0.000
 five thresholds, all negative. On the delay state of Section 7 the same criterion spans 0.0378
 and picks a clear winner. A selection rule can only separate candidates that differ.
 
-One real result was overstated rather than false. The Section 7 sparse fit leads an unfitted
+**Two real results were overstated.** One was overstated by its control. The Section 7 sparse fit leads an unfitted
 2-frame momentum control by 0.26 uniform skill, but a fitted per-joint autoregression by only
 0.02 across resplits. The lead survives; its size did not. That is the origin of the local motion
 rule in Section 4: a fitted model's control is fitted too.
 
-A second overstatement came from the input rather than the control. Persistence was the right
+The second was overstated by the input rather than the control. Persistence was the right
 reference for the Section 7 skill, but the state it was scored on had been smoothed with a
 centred window, so part of each predicted increment was already in the input. Rebuilt without
 smoothing, 0.39 becomes 0.05 uniform (Section 7.3). The general form is the Section 6.3 oracle
@@ -621,7 +625,8 @@ comparison, or the comparison measures the step.
   largely two-dimensional and noisier than marker-based capture, and camera angle, zoom and
   occlusion can change feature values independently of the motion.
 - *Task.* No configuration shows predictive validity on free-running reconstruction. The
-  Section 7 model is a one-step predictor on a delay state and cannot be integrated forward.
+  Section 7 model is a one-step predictor on a delay state. Rolled out by shift-and-update it
+  loses to persistence on the uniform score at every horizon tested (Section 5.3).
 - *Smoothing.* The 0.39 skill level depends on a centred filter that reads future frames. Only
   the unsmoothed figure, 0.05 to 0.09, is achievable as a real-time forecast, and the pipeline's
   own figures in Section 7.4 are all under the centred filter.
@@ -656,8 +661,8 @@ Sparse dynamical models fitted to broadcast-derived pitching pose do not reconst
 motion. Every configuration tried — first-order, second-order, ensemble and weak-form — is beaten
 by a predictor that holds the initial pose fixed, and accuracy falls as model complexity rises.
 Direct tests make phase, clip heterogeneity, the pose noise floor and the sparse estimator
-unlikely explanations, and point to the state representation: joint positions alone do not
-determine the next increment.
+unlikely primary explanations, and favour missing history in the state: joint positions alone do
+not determine the next increment. Measurement noise is not ruled out as a contributor.
 
 Adding two frames of history supports short-horizon prediction, and the project's own sparse
 estimator recovers it with 30 terms, matching a 240-coefficient dense model. Most of the measured
