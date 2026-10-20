@@ -3,7 +3,7 @@
 ## Technical paper
 
 The current write-up is `docs/technical_paper.md`; the built IEEE PDF is
-`YU_TECHNICAL_PAPER_v4.pdf` (`python scripts/build_paper_pdf.py`). `docs/reproducing.md`
+`YU_TECHNICAL_PAPER_v5.pdf` (`python scripts/build_paper_pdf.py`). `docs/reproducing.md`
 gives the command for every number the paper reports; `src/analysis/make_paper_figures.py`
 renders its figures.
 

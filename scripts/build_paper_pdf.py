@@ -391,7 +391,7 @@ def main() -> None:
         raise SystemExit("pdflatex not found; install texlive")
 
     out_path = Path(args.output) if args.output else PROJECT_ROOT / (
-        "YU_TECHNICAL_PAPER_v4.pdf" if args.style == "ieee" else "technical_paper.pdf"
+        "YU_TECHNICAL_PAPER_v5.pdf" if args.style == "ieee" else "technical_paper.pdf"
     )
     date = args.date or datetime.date.fromtimestamp(SOURCE.stat().st_mtime).strftime("%B %d, %Y")
     body, abstract = preprocess(SOURCE.read_text(), args.style)
